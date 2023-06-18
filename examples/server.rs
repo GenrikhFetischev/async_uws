@@ -1,10 +1,8 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
 
 use tokio::time::sleep;
 
-use async_uws::app::{App, AppStruct};
+use async_uws::app::App;
 use async_uws::http_request::HttpRequest;
 use async_uws::http_response::HttpResponse;
 use async_uws::uwebsockets_rs::UsSocketContextOptions;
@@ -26,6 +24,9 @@ async fn main() {
     let mut app = App::new(opts);
 
     app.get("/get", get_handler)
+        .post("/x", move |res, req| async {
+            res.end(Some("response post"), true);
+        })
         .get(
             "/closure",
             move |res: HttpResponse<false>, req: HttpRequest| async {
@@ -40,21 +41,9 @@ async fn main() {
 }
 
 async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
-    println!("Handler started");
+    let path = req.get_full_url();
+    println!("Handler started {path}");
     sleep(Duration::from_secs(1)).await;
     println!("Ready to respond");
     res.end(Some("it's the response"), true);
 }
-
-// fn get_handler(
-//     res: HttpResponse<false>,
-//     req: HttpRequest,
-// ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>> {
-//     Box::pin(async move {
-//         println!("Handler started");
-//         sleep(Duration::from_secs(1)).await;
-//         println!("Ready to respond");
-//         res.end(Some("it's the response"), true);
-//
-//     })
-// }

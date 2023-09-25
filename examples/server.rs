@@ -60,6 +60,39 @@ async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
 
 async fn ws_echo(ws: &mut Websocket<false>) {
     while let Some(msg) = ws.stream.recv().await {
-        ws.sink.send(msg).unwrap()
+        match msg {
+            WsMessage::Message(bin, opcode) => {
+                if opcode == Opcode::Text {
+                    let msg = String::from_utf8(bin).unwrap();
+                    println!("{msg}");
+
+                    if msg.contains("close") {
+                        let res = ws
+                            .sink
+                            .send(WsMessage::Close(1003, Some("just close".to_string())));
+                        if let Err(e) = res {
+                            println!("{e}");
+                        }
+                    }
+                }
+            }
+            WsMessage::Ping(_) => {
+                println!("Got ping");
+            }
+            WsMessage::Pong(_) => {
+                println!("Got pong");
+            }
+            WsMessage::Close(code, reason) => {
+                println!("Got close: {code}, {reason:#?}");
+                break;
+            }
+        }
+        ws.sink
+            .send(WsMessage::Message(
+                Vec::from("response to your message".as_bytes()),
+                Opcode::Text,
+            ))
+            .unwrap()
     }
+    println!("Done with that websocket!");
 }

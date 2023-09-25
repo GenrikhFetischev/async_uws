@@ -1,6 +1,6 @@
 [package]
 name = "async_uws"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 
 [profile.dev.build-override]
@@ -10,6 +10,5 @@ debug = true
 
 
 [dependencies]
-uwebsockets_rs = { path = "../uwebsockets_rs", features = ["native-access"] }
+uwebsockets_rs = { version = "0.0.5", path = "../uwebsockets_rs", features = ["native-access"] }
 tokio = { version = "1.28.1", features = ["full"] }
-rand = "0.8.5"

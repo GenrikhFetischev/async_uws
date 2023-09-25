@@ -2,6 +2,13 @@
 name = "async_uws"
 version = "0.0.1"
 edition = "2021"
+authors = ["Genrikh Fetishchev <genrikhfetischev@gmail.com>"]
+description = "Rust async HTTP & WebSocket server based on uWebSockets"
+license = "MIT"
+homepage = "https://github.com/GenrikhFetischev/async_uws"
+repository = "https://github.com/GenrikhFetischev/async_uws"
+keywords = ["http", "websocket", "server", "uwebsockets"]
+exclude = ["build.rs"]
 
 [profile.dev.build-override]
 debug = true
@@ -12,3 +19,5 @@ debug = true
 [dependencies]
 uwebsockets_rs = { version = "0.0.5", path = "../uwebsockets_rs", features = ["native-access"] }
 tokio = { version = "1.28.1", features = ["full"] }
+
+

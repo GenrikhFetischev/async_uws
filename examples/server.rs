@@ -1,16 +1,17 @@
 use std::time::Duration;
 
 use tokio::time::sleep;
+use uwebsockets_rs::websocket::Opcode;
 
 use async_uws::app::App;
 use async_uws::http_request::HttpRequest;
 use async_uws::http_response::HttpResponse;
 use async_uws::uwebsockets_rs::UsSocketContextOptions;
+use async_uws::websocket::Websocket;
+use async_uws::ws_message::WsMessage;
 
 #[tokio::main]
 async fn main() {
-    print!("\x1B[2J\x1B[1;1H");
-    println!("/////");
     let opts = UsSocketContextOptions {
         key_file_name: None,
         cert_file_name: None,
@@ -36,6 +37,15 @@ async fn main() {
                 res.end(Some("Closure it's the response"), true);
             },
         )
+        .ws("/ws", |mut ws| async move {
+            let to_send = WsMessage::Message(Vec::from("hello".as_bytes()), Opcode::Binary);
+            ws.sink.send(to_send).expect("FAIL");
+            while let Some(msg) = ws.stream.recv().await {
+                println!("{msg:#?}");
+                ws.sink.send(msg).unwrap();
+            }
+        })
+        .ws("/ws-echo", |mut ws| async move { ws_echo(&mut ws).await })
         .listen(3001, None::<fn()>)
         .run();
 }
@@ -46,4 +56,10 @@ async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
     sleep(Duration::from_secs(1)).await;
     println!("Ready to respond");
     res.end(Some("it's the response"), true);
+}
+
+async fn ws_echo(ws: &mut Websocket<false>) {
+    while let Some(msg) = ws.stream.recv().await {
+        ws.sink.send(msg).unwrap()
+    }
 }

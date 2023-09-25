@@ -7,9 +7,12 @@ use uwebsockets_rs::http_request::HttpRequest;
 use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::us_socket_context_options::UsSocketContextOptions;
 use uwebsockets_rs::uws_loop::{get_loop, UwsLoop};
+use uwebsockets_rs::websocket_behavior::CompressOptions;
 
 use crate::http_response::HttpResponse;
 use crate::send_ptr::SendPtr;
+use crate::websocket::Websocket;
+use crate::ws_behavior::WebsocketBehavior;
 
 pub type App = AppStruct<false>;
 pub type AppSSL = AppStruct<true>;
@@ -29,8 +32,27 @@ impl<const SSL: bool> AppStruct<SSL> {
         }
     }
 
-    pub fn ws(&mut self, _pattern: &str) {
-        todo!()
+    pub fn ws<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
+    where
+        T: (Fn(Websocket<SSL>) -> W) + 'static + Send + Sync + Clone,
+        W: Future<Output = ()> + 'static + Send,
+    {
+        let compressor: u32 = CompressOptions::SharedCompressor.into();
+        let decompressor: u32 = CompressOptions::SharedDecompressor.into();
+        let ws_behavior = WebsocketBehavior::new(
+            Some(compressor | decompressor),
+            Some(1024),
+            Some(800),
+            Some(10),
+            Some(false),
+            Some(true),
+            Some(true),
+            Some(111),
+            self.uws_loop,
+            handler,
+        );
+        self.native_app.ws(pattern, ws_behavior.native_ws_behaviour);
+        self
     }
 
     pub fn get<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
@@ -38,7 +60,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
-        let internal_handler = wrap_handler(handler, self.uws_loop);
+        let internal_handler = wrap_http_handler(handler, self.uws_loop);
         self.native_app.get(pattern, internal_handler);
         self
     }
@@ -48,7 +70,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
-        let internal_handler = wrap_handler(handler, self.uws_loop);
+        let internal_handler = wrap_http_handler(handler, self.uws_loop);
         self.native_app.post(pattern, internal_handler);
         self
     }
@@ -58,7 +80,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
-        let internal_handler = wrap_handler(handler, self.uws_loop);
+        let internal_handler = wrap_http_handler(handler, self.uws_loop);
         self.native_app.patch(pattern, internal_handler);
         self
     }
@@ -68,7 +90,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
-        let internal_handler = wrap_handler(handler, self.uws_loop);
+        let internal_handler = wrap_http_handler(handler, self.uws_loop);
         self.native_app.delete(pattern, internal_handler);
         self
     }
@@ -78,7 +100,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
-        let internal_handler = wrap_handler(handler, self.uws_loop);
+        let internal_handler = wrap_http_handler(handler, self.uws_loop);
         self.native_app.options(pattern, internal_handler);
         self
     }
@@ -88,7 +110,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
-        let internal_handler = wrap_handler(handler, self.uws_loop);
+        let internal_handler = wrap_http_handler(handler, self.uws_loop);
         self.native_app.put(pattern, internal_handler);
         self
     }
@@ -98,7 +120,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
-        let internal_handler = wrap_handler(handler, self.uws_loop);
+        let internal_handler = wrap_http_handler(handler, self.uws_loop);
         self.native_app.trace(pattern, internal_handler);
         self
     }
@@ -108,7 +130,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
-        let internal_handler = wrap_handler(handler, self.uws_loop);
+        let internal_handler = wrap_http_handler(handler, self.uws_loop);
         self.native_app.connect(pattern, internal_handler);
         self
     }
@@ -118,7 +140,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
-        let internal_handler = wrap_handler(handler, self.uws_loop);
+        let internal_handler = wrap_http_handler(handler, self.uws_loop);
         self.native_app.any(pattern, internal_handler);
         self
     }
@@ -133,7 +155,7 @@ impl<const SSL: bool> AppStruct<SSL> {
     }
 }
 
-pub fn wrap_handler<T, R, const SSL: bool>(
+pub fn wrap_http_handler<T, R, const SSL: bool>(
     handler: T,
     uws_loop: UwsLoop,
 ) -> Box<dyn Fn(HttpResponseStruct<SSL>, HttpRequest)>

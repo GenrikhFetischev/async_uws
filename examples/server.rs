@@ -45,7 +45,8 @@ async fn main() {
                 ws.sink.send(msg).unwrap();
             }
         })
-        .ws("/ws-echo", |mut ws| async move { ws_echo(&mut ws).await })
+        .ws("/ws-echo", |ws| async move { handler_ws(ws).await })
+        .ws("/ws-test", handler_ws)
         .listen(3001, None::<fn()>)
         .run();
 }
@@ -58,7 +59,7 @@ async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
     res.end(Some("it's the response"), true);
 }
 
-async fn ws_echo(ws: &mut Websocket<false>) {
+async fn handler_ws(mut ws: Websocket<false>) {
     while let Some(msg) = ws.stream.recv().await {
         match msg {
             WsMessage::Message(bin, opcode) => {

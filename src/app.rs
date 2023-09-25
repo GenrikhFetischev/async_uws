@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use uwebsockets_rs::app::Application as NativeApp;
 use uwebsockets_rs::http_request::HttpRequest;
@@ -12,7 +13,7 @@ use uwebsockets_rs::websocket_behavior::CompressOptions;
 use crate::http_response::HttpResponse;
 use crate::send_ptr::SendPtr;
 use crate::websocket::Websocket;
-use crate::ws_behavior::WebsocketBehavior;
+use crate::ws_behavior::{WebsocketBehavior, WsPerConnectionUserData};
 
 pub type App = AppStruct<false>;
 pub type AppSSL = AppStruct<true>;
@@ -20,6 +21,7 @@ pub type AppSSL = AppStruct<true>;
 pub struct AppStruct<const SSL: bool> {
     uws_loop: UwsLoop,
     native_app: NativeApp<SSL>,
+    ws_per_connection_user_data_storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
 }
 
 impl<const SSL: bool> AppStruct<SSL> {
@@ -29,6 +31,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         AppStruct {
             uws_loop,
             native_app,
+            ws_per_connection_user_data_storage: Default::default(),
         }
     }
 
@@ -49,6 +52,7 @@ impl<const SSL: bool> AppStruct<SSL> {
             Some(true),
             Some(111),
             self.uws_loop,
+            self.ws_per_connection_user_data_storage.clone(),
             handler,
         );
         self.native_app.ws(pattern, ws_behavior.native_ws_behaviour);

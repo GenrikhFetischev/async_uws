@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::future::Future;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::http_request::HttpRequest;
@@ -13,15 +15,11 @@ use crate::websocket::Websocket;
 use crate::ws_message::WsMessage;
 
 #[derive(Debug)]
-struct WsUserData {
+pub struct WsPerConnectionUserData {
+    id: usize,
+    storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
     sink: UnboundedSender<WsMessage>,
     stream: Option<UnboundedReceiver<WsMessage>>,
-}
-
-impl Drop for WsUserData {
-    fn drop(&mut self) {
-        println!("DROP!!!!!!!");
-    }
 }
 
 pub struct WebsocketBehavior<const SSL: bool> {
@@ -40,6 +38,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
         send_pings_automatically: Option<bool>,
         max_lifetime: Option<u16>,
         uws_loop: UwsLoop,
+        ws_per_socket_data_storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
         handler: T,
     ) -> Self
     where
@@ -62,19 +61,26 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                         .expect("[async_uws]: There is no sec-websocket-key in req headers");
                     let ws_protocol = req.get_header("sec-websocket-protocol");
                     let ws_extensions = req.get_header("sec-websocket-extensions");
-
                     let (sink, stream) = unbounded_channel::<WsMessage>();
-                    let user_data = WsUserData {
+                    let user_data_id = ctx.get_context_ptr() as usize;
+                    let user_data = WsPerConnectionUserData {
                         sink,
+                        id: user_data_id,
                         stream: Some(stream),
+                        storage: ws_per_socket_data_storage.clone(),
                     };
+
+                    let mut storage = ws_per_socket_data_storage.lock().unwrap();
+                    storage.insert(user_data_id, user_data);
+
+                    let user_data_ref = storage.get_mut(&user_data_id).unwrap();
 
                     res.upgrade(
                         ws_key_string,
                         ws_protocol,
                         ws_extensions,
                         ctx,
-                        Some(Box::new(user_data)),
+                        Some(user_data_ref),
                     );
                 },
             )),
@@ -83,7 +89,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                 let uws_loop = uws_loop;
 
                 let user_data = ws_connection
-                    .get_user_data::<WsUserData>()
+                    .get_user_data::<WsPerConnectionUserData>()
                     .expect("[async_uws]: There is no receiver / sender pair in ws user data");
                 let stream = user_data.stream.take().unwrap();
                 tokio::spawn(async move {
@@ -107,7 +113,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
 
 fn message<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: &[u8], opcode: Opcode) {
     let user_data = native_ws
-        .get_user_data::<WsUserData>()
+        .get_user_data::<WsPerConnectionUserData>()
         .expect("[async_uws]: There is no receiver / sender pair in ws user data");
 
     user_data
@@ -118,11 +124,14 @@ fn message<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: &[u8], opc
 
 fn close<const SSL: bool>(native_ws: WebSocketStruct<SSL>, code: i32, reason: Option<&str>) {
     let user_data = native_ws
-        .get_user_data::<WsUserData>()
+        .get_user_data::<WsPerConnectionUserData>()
         .expect("[async_uws]: There is no receiver / sender pair in ws user data");
 
     user_data
         .sink
         .send(WsMessage::Close(code, reason.map(String::from)))
         .unwrap();
+
+    let mut storage = user_data.storage.lock().unwrap();
+    storage.remove(&user_data.id);
 }

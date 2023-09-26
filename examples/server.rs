@@ -39,13 +39,13 @@ async fn main() {
         )
         .ws("/ws", |mut ws| async move {
             let to_send = WsMessage::Message(Vec::from("hello".as_bytes()), Opcode::Binary);
-            ws.send(to_send);
+            let status = ws.send(to_send).await;
+            println!("Send status: {status:#?}");
             while let Some(msg) = ws.stream.recv().await {
                 println!("{msg:#?}");
-                ws.send(msg);
+                ws.send(msg).await;
             }
         })
-        .ws("/ws-echo", |ws| async move { handler_ws(ws).await })
         .ws("/ws-test", handler_ws)
         .listen(3001, None::<fn()>)
         .run();
@@ -68,7 +68,8 @@ async fn handler_ws(mut ws: Websocket<false>) {
                     println!("{msg}");
 
                     if msg.contains("close") {
-                        ws.send(WsMessage::Close(1003, Some("just close".to_string())));
+                        ws.send(WsMessage::Close(1003, Some("just close".to_string())))
+                            .await;
                     }
                 }
             }
@@ -87,6 +88,7 @@ async fn handler_ws(mut ws: Websocket<false>) {
             Vec::from("response to your message".as_bytes()),
             Opcode::Text,
         ))
+        .await;
     }
     println!("Done with that websocket!");
 }

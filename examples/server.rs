@@ -8,6 +8,7 @@ use async_uws::http_request::HttpRequest;
 use async_uws::http_response::HttpResponse;
 use async_uws::uwebsockets_rs::UsSocketContextOptions;
 use async_uws::websocket::Websocket;
+use async_uws::ws_behavior::WsRouteSettings;
 use async_uws::ws_message::WsMessage;
 
 #[tokio::main]
@@ -23,30 +24,30 @@ async fn main() {
     };
 
     let mut app = App::new(opts);
+    let route_settings = WsRouteSettings::default();
 
     app.get("/get", get_handler)
-        .post("/x", move |res, req| async {
+        .post("/x", move |res, _req| async {
             res.end(Some("response post"), true);
         })
         .get(
             "/closure",
-            move |res: HttpResponse<false>, req: HttpRequest| async {
+            move |res: HttpResponse<false>, _req: HttpRequest| async {
                 println!("Closure Handler started");
                 sleep(Duration::from_secs(1)).await;
                 println!("Closure Ready to respond");
                 res.end(Some("Closure it's the response"), true);
             },
         )
-        .ws("/ws", |mut ws| async move {
-            let to_send = WsMessage::Message(Vec::from("hello".as_bytes()), Opcode::Binary);
-            let status = ws.send(to_send).await;
+        .ws("/ws", route_settings.clone(), |mut ws| async move {
+            let status = ws.send("hello".into()).await;
             println!("Send status: {status:#?}");
             while let Some(msg) = ws.stream.recv().await {
                 println!("{msg:#?}");
                 ws.send(msg).await;
             }
         })
-        .ws("/ws-test", handler_ws)
+        .ws("/ws-test", route_settings, handler_ws)
         .listen(3001, None::<fn()>)
         .run();
 }

@@ -8,7 +8,7 @@ use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::uws_loop::UwsLoop;
 use uwebsockets_rs::websocket::{Opcode, WebSocketStruct};
 use uwebsockets_rs::websocket_behavior::{
-    UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
+    CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
 };
 
 use crate::websocket::Websocket;
@@ -22,6 +22,35 @@ pub struct WsPerConnectionUserData {
     stream: Option<UnboundedReceiver<WsMessage>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct WsRouteSettings {
+    pub compression: Option<u32>,
+    pub max_payload_length: Option<u32>,
+    pub idle_timeout: Option<u16>,
+    pub max_backpressure: Option<u32>,
+    pub close_on_backpressure_limit: Option<bool>,
+    pub reset_idle_timeout_on_send: Option<bool>,
+    pub send_pings_automatically: Option<bool>,
+    pub max_lifetime: Option<u16>,
+}
+
+impl Default for WsRouteSettings {
+    fn default() -> Self {
+        let compressor: u32 = CompressOptions::SharedCompressor.into();
+        let decompressor: u32 = CompressOptions::SharedDecompressor.into();
+        WsRouteSettings {
+            compression: Some(compressor | decompressor),
+            max_payload_length: Some(1024),
+            idle_timeout: Some(800),
+            max_backpressure: Some(10),
+            close_on_backpressure_limit: Some(false),
+            reset_idle_timeout_on_send: Some(true),
+            send_pings_automatically: Some(true),
+            max_lifetime: Some(111),
+        }
+    }
+}
+
 pub struct WebsocketBehavior<const SSL: bool> {
     pub native_ws_behaviour: NativeWebSocketBehavior<SSL>,
 }
@@ -29,14 +58,7 @@ pub struct WebsocketBehavior<const SSL: bool> {
 impl<const SSL: bool> WebsocketBehavior<SSL> {
     #[allow(clippy::too_many_arguments)]
     pub fn new<T, W>(
-        compression: Option<u32>,
-        max_payload_length: Option<u32>,
-        idle_timeout: Option<u16>,
-        max_backpressure: Option<u32>,
-        close_on_backpressure_limit: Option<bool>,
-        reset_idle_timeout_on_send: Option<bool>,
-        send_pings_automatically: Option<bool>,
-        max_lifetime: Option<u16>,
+        settings: WsRouteSettings,
         uws_loop: UwsLoop,
         ws_per_socket_data_storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
         handler: T,
@@ -46,14 +68,14 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
         W: Future<Output = ()> + 'static + Send,
     {
         let native_ws_behaviour = NativeWebSocketBehavior {
-            compression: compression.unwrap_or_default(),
-            max_payload_length: max_payload_length.unwrap_or_default(),
-            idle_timeout: idle_timeout.unwrap_or_default(),
-            max_backpressure: max_backpressure.unwrap_or_default(),
-            close_on_backpressure_limit: close_on_backpressure_limit.unwrap_or_default(),
-            reset_idle_timeout_on_send: reset_idle_timeout_on_send.unwrap_or_default(),
-            send_pings_automatically: send_pings_automatically.unwrap_or_default(),
-            max_lifetime: max_lifetime.unwrap_or_default(),
+            compression: settings.compression.unwrap_or_default(),
+            max_payload_length: settings.max_payload_length.unwrap_or_default(),
+            idle_timeout: settings.idle_timeout.unwrap_or_default(),
+            max_backpressure: settings.max_backpressure.unwrap_or_default(),
+            close_on_backpressure_limit: settings.close_on_backpressure_limit.unwrap_or_default(),
+            reset_idle_timeout_on_send: settings.reset_idle_timeout_on_send.unwrap_or_default(),
+            send_pings_automatically: settings.send_pings_automatically.unwrap_or_default(),
+            max_lifetime: settings.max_lifetime.unwrap_or_default(),
             upgrade: Some(Box::new(
                 move |res: HttpResponseStruct<SSL>, req: HttpRequest, ctx: UpgradeContext| {
                     let ws_key_string = req

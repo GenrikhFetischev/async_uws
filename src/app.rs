@@ -8,12 +8,11 @@ use uwebsockets_rs::http_request::HttpRequest;
 use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::us_socket_context_options::UsSocketContextOptions;
 use uwebsockets_rs::uws_loop::{get_loop, UwsLoop};
-use uwebsockets_rs::websocket_behavior::CompressOptions;
 
 use crate::http_response::HttpResponse;
 use crate::send_ptr::SendPtr;
 use crate::websocket::Websocket;
-use crate::ws_behavior::{WebsocketBehavior, WsPerConnectionUserData};
+use crate::ws_behavior::{WebsocketBehavior, WsPerConnectionUserData, WsRouteSettings};
 
 pub type App = AppStruct<false>;
 pub type AppSSL = AppStruct<true>;
@@ -35,22 +34,18 @@ impl<const SSL: bool> AppStruct<SSL> {
         }
     }
 
-    pub fn ws<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
+    pub fn ws<T, W>(
+        &mut self,
+        pattern: &str,
+        route_settings: WsRouteSettings,
+        handler: T,
+    ) -> &mut Self
     where
         T: (Fn(Websocket<SSL>) -> W) + 'static + Send + Sync + Clone,
         W: Future<Output = ()> + 'static + Send,
     {
-        let compressor: u32 = CompressOptions::SharedCompressor.into();
-        let decompressor: u32 = CompressOptions::SharedDecompressor.into();
         let ws_behavior = WebsocketBehavior::new(
-            Some(compressor | decompressor),
-            Some(1024),
-            Some(800),
-            Some(10),
-            Some(false),
-            Some(true),
-            Some(true),
-            Some(111),
+            route_settings,
             self.uws_loop,
             self.ws_per_connection_user_data_storage.clone(),
             handler,

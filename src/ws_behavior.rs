@@ -120,11 +120,11 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                 });
             })),
             message: Some(Box::new(message)),
-            ping: None,
-            pong: None,
+            ping: Some(Box::new(ping)),
+            pong: Some(Box::new(pong)),
             close: Some(Box::new(close)),
-            drain: None,
-            subscription: None,
+            drain: Some(Box::new(drain)),
+            subscription: Some(Box::new(subscription)),
         };
 
         WebsocketBehavior {
@@ -156,4 +156,39 @@ fn close<const SSL: bool>(native_ws: WebSocketStruct<SSL>, code: i32, reason: Op
 
     let mut storage = user_data.storage.lock().unwrap();
     storage.remove(&user_data.id);
+}
+
+fn ping<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>) {
+    let user_data = native_ws
+        .get_user_data::<WsPerConnectionUserData>()
+        .expect("[async_uws]: There is no receiver / sender pair in ws user data");
+
+    user_data
+        .sink
+        .send(WsMessage::Ping(message.map(Vec::from)))
+        .unwrap();
+}
+
+fn pong<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>) {
+    let user_data = native_ws
+        .get_user_data::<WsPerConnectionUserData>()
+        .expect("[async_uws]: There is no receiver / sender pair in ws user data");
+
+    user_data
+        .sink
+        .send(WsMessage::Pong(message.map(Vec::from)))
+        .unwrap();
+}
+
+fn drain<const SSL: bool>(_native_ws: WebSocketStruct<SSL>) {
+    todo!("Handle drain event")
+}
+
+fn subscription<const SSL: bool>(
+    _native_ws: WebSocketStruct<SSL>,
+    _topic: &str,
+    _param1: i32,
+    _param2: i32,
+) {
+    todo!("handle incoming subscription")
 }

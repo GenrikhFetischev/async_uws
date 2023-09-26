@@ -38,7 +38,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         &mut self,
         pattern: &str,
         route_settings: WsRouteSettings,
-        handler: T,
+        connection_handler: T,
     ) -> &mut Self
     where
         T: (Fn(Websocket<SSL>) -> W) + 'static + Send + Sync + Clone,
@@ -48,7 +48,7 @@ impl<const SSL: bool> AppStruct<SSL> {
             route_settings,
             self.uws_loop,
             self.ws_per_connection_user_data_storage.clone(),
-            handler,
+            connection_handler,
         );
         self.native_app.ws(pattern, ws_behavior.native_ws_behaviour);
         self

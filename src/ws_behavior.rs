@@ -12,7 +12,7 @@ use uwebsockets_rs::websocket_behavior::{
     CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
 };
 
-use crate::websocket::Websocket;
+use crate::websocket::{RequestData, Websocket};
 use crate::ws_message::WsMessage;
 
 #[derive(Debug)]
@@ -21,7 +21,8 @@ pub struct WsPerConnectionUserData {
     storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
     sink: UnboundedSender<WsMessage>,
     stream: Option<UnboundedReceiver<WsMessage>>,
-    pub(crate) is_open: Arc<AtomicBool>,
+    is_open: Arc<AtomicBool>,
+    req_data: Option<RequestData>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,26 +80,39 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
             send_pings_automatically: settings.send_pings_automatically.unwrap_or_default(),
             max_lifetime: settings.max_lifetime.unwrap_or_default(),
             upgrade: Some(Box::new(
-                move |res: HttpResponseStruct<SSL>, req: HttpRequest, ctx: UpgradeContext| {
-                    let ws_key_string = req
-                        .get_header("sec-websocket-key")
-                        .expect("[async_uws]: There is no sec-websocket-key in req headers");
-                    let ws_protocol = req.get_header("sec-websocket-protocol");
-                    let ws_extensions = req.get_header("sec-websocket-extensions");
+                move |res: HttpResponseStruct<SSL>, mut req: HttpRequest, ctx: UpgradeContext| {
+                    let headers: Vec<(String, String)> = req
+                        .get_headers()
+                        .clone()
+                        .into_iter()
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .collect();
                     let (sink, stream) = unbounded_channel::<WsMessage>();
                     let user_data_id = ctx.get_context_ptr() as usize;
+
+                    let req_data = RequestData {
+                        full_url: req.get_full_url().to_string(),
+                        headers,
+                    };
                     let user_data = WsPerConnectionUserData {
                         sink,
                         id: user_data_id,
                         stream: Some(stream),
                         storage: ws_per_socket_data_storage.clone(),
                         is_open: Arc::new(AtomicBool::new(true)),
+                        req_data: Some(req_data),
                     };
 
                     let mut storage = ws_per_socket_data_storage.lock().unwrap();
                     storage.insert(user_data_id, user_data);
 
                     let user_data_ref = storage.get_mut(&user_data_id).unwrap();
+
+                    let ws_key_string = req
+                        .get_header("sec-websocket-key")
+                        .expect("[async_uws]: There is no sec-websocket-key in req headers");
+                    let ws_protocol = req.get_header("sec-websocket-protocol");
+                    let ws_extensions = req.get_header("sec-websocket-extensions");
 
                     res.upgrade(
                         ws_key_string,
@@ -118,8 +132,9 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                     .expect("[async_uws]: There is no receiver / sender pair in ws user data");
                 let stream = user_data.stream.take().unwrap();
                 let is_open = user_data.is_open.clone();
+                let req_data = user_data.req_data.take().unwrap();
                 tokio::spawn(async move {
-                    let ws = Websocket::new(ws_connection, uws_loop, stream, is_open);
+                    let ws = Websocket::new(ws_connection, uws_loop, stream, is_open, req_data);
                     handler(ws).await;
                 });
             })),

@@ -44,7 +44,7 @@ async fn main() {
             println!("Send status: {status:#?}");
             while let Some(msg) = ws.stream.recv().await {
                 println!("{msg:#?}");
-                ws.send(msg).await;
+                ws.send(msg).await.unwrap();
             }
         })
         .ws("/ws-test", route_settings, handler_ws)
@@ -61,6 +61,7 @@ async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
 }
 
 async fn handler_ws(mut ws: Websocket<false>) {
+    println!("{:#?}", ws.req_data);
     while let Some(msg) = ws.stream.recv().await {
         match msg {
             WsMessage::Message(bin, opcode) => {
@@ -70,7 +71,8 @@ async fn handler_ws(mut ws: Websocket<false>) {
 
                     if msg.contains("close") {
                         ws.send(WsMessage::Close(1003, Some("just close".to_string())))
-                            .await;
+                            .await
+                            .unwrap();
                     }
                 }
             }
@@ -89,7 +91,8 @@ async fn handler_ws(mut ws: Websocket<false>) {
             Vec::from("response to your message".as_bytes()),
             Opcode::Text,
         ))
-        .await;
+        .await
+        .unwrap();
     }
     println!("Done with that websocket!");
 }

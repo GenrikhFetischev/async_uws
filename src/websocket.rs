@@ -12,15 +12,38 @@ use crate::ws_message::WsMessage;
 
 pub struct Websocket<const SSL: bool> {
     pub stream: UnboundedReceiver<WsMessage>,
+    pub req_data: RequestData,
     native: WebSocketStruct<SSL>,
     uws_loop: UwsLoop,
     is_open: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+pub struct RequestData {
+    pub full_url: String,
+    pub headers: Vec<(String, String)>,
 }
 
 unsafe impl<const SSL: bool> Send for Websocket<SSL> {}
 unsafe impl<const SSL: bool> Sync for Websocket<SSL> {}
 
 impl<const SSL: bool> Websocket<SSL> {
+    pub fn new(
+        native: WebSocketStruct<SSL>,
+        uws_loop: UwsLoop,
+        from_native_stream: UnboundedReceiver<WsMessage>,
+        is_open: Arc<AtomicBool>,
+        req_data: RequestData,
+    ) -> Self {
+        Websocket {
+            stream: from_native_stream,
+            native,
+            uws_loop,
+            is_open,
+            req_data,
+        }
+    }
+
     pub async fn send(&mut self, message: WsMessage) -> Result<SendStatus, String> {
         let is_open = self.is_open.load(Ordering::SeqCst);
         if !is_open {
@@ -75,20 +98,6 @@ impl<const SSL: bool> Websocket<SSL> {
                 Ok(WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await)
             }
             msg => self.send(msg).await,
-        }
-    }
-
-    pub fn new(
-        native: WebSocketStruct<SSL>,
-        uws_loop: UwsLoop,
-        from_native_stream: UnboundedReceiver<WsMessage>,
-        is_open: Arc<AtomicBool>,
-    ) -> Self {
-        Websocket {
-            stream: from_native_stream,
-            native,
-            uws_loop,
-            is_open,
         }
     }
 }

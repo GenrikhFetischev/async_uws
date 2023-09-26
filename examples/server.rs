@@ -11,6 +11,11 @@ use async_uws::websocket::Websocket;
 use async_uws::ws_behavior::WsRouteSettings;
 use async_uws::ws_message::WsMessage;
 
+#[derive(Clone)]
+struct SharedData {
+    pub data: String,
+}
+
 #[tokio::main]
 async fn main() {
     let opts = UsSocketContextOptions {
@@ -23,8 +28,13 @@ async fn main() {
         ssl_prefer_low_memory_usage: None,
     };
 
+    let shared_data = SharedData {
+        data: "String containing data".to_string(),
+    };
+
     let mut app = App::new(opts);
     let route_settings = WsRouteSettings::default();
+    app.data(shared_data);
 
     app.get("/get", get_handler)
         .post("/x", move |res, _req| async {
@@ -53,6 +63,8 @@ async fn main() {
 }
 
 async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
+    let data = res.data::<SharedData>().unwrap();
+    println!("!!! Shared data: {}", data.data);
     let path = req.get_full_url();
     println!("Handler started {path}");
     sleep(Duration::from_secs(1)).await;
@@ -62,6 +74,8 @@ async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
 
 async fn handler_ws(mut ws: Websocket<false>) {
     println!("{:#?}", ws.req_data);
+    let data = ws.data::<SharedData>().unwrap();
+    println!("!!! Shared data: {}", data.data);
     while let Some(msg) = ws.stream.recv().await {
         match msg {
             WsMessage::Message(bin, opcode) => {

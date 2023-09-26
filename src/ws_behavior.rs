@@ -12,6 +12,7 @@ use uwebsockets_rs::websocket_behavior::{
     CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
 };
 
+use crate::data_storage::SharedDataStorage;
 use crate::websocket::{RequestData, Websocket};
 use crate::ws_message::WsMessage;
 
@@ -23,6 +24,7 @@ pub struct WsPerConnectionUserData {
     stream: Option<UnboundedReceiver<WsMessage>>,
     is_open: Arc<AtomicBool>,
     req_data: Option<RequestData>,
+    shared_data_storage: SharedDataStorage,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +67,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
         uws_loop: UwsLoop,
         ws_per_socket_data_storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
         handler: T,
+        shared_data_storage: SharedDataStorage,
     ) -> Self
     where
         T: (Fn(Websocket<SSL>) -> W) + 'static + Send + Sync + Clone,
@@ -101,6 +104,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                         storage: ws_per_socket_data_storage.clone(),
                         is_open: Arc::new(AtomicBool::new(true)),
                         req_data: Some(req_data),
+                        shared_data_storage: shared_data_storage.clone(),
                     };
 
                     let mut storage = ws_per_socket_data_storage.lock().unwrap();
@@ -133,8 +137,16 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                 let stream = user_data.stream.take().unwrap();
                 let is_open = user_data.is_open.clone();
                 let req_data = user_data.req_data.take().unwrap();
+                let data_storage = user_data.shared_data_storage.clone();
                 tokio::spawn(async move {
-                    let ws = Websocket::new(ws_connection, uws_loop, stream, is_open, req_data);
+                    let ws = Websocket::new(
+                        ws_connection,
+                        uws_loop,
+                        stream,
+                        is_open,
+                        req_data,
+                        data_storage,
+                    );
                     handler(ws).await;
                 });
             })),

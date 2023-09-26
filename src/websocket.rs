@@ -8,6 +8,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket::{Opcode, SendStatus, WebSocketStruct};
 
+use crate::data_storage::SharedDataStorage;
 use crate::ws_message::WsMessage;
 
 pub struct Websocket<const SSL: bool> {
@@ -16,6 +17,7 @@ pub struct Websocket<const SSL: bool> {
     native: WebSocketStruct<SSL>,
     uws_loop: UwsLoop,
     is_open: Arc<AtomicBool>,
+    pub data_storage: SharedDataStorage,
 }
 
 #[derive(Debug)]
@@ -34,6 +36,7 @@ impl<const SSL: bool> Websocket<SSL> {
         from_native_stream: UnboundedReceiver<WsMessage>,
         is_open: Arc<AtomicBool>,
         req_data: RequestData,
+        data_storage: SharedDataStorage,
     ) -> Self {
         Websocket {
             stream: from_native_stream,
@@ -41,7 +44,12 @@ impl<const SSL: bool> Websocket<SSL> {
             uws_loop,
             is_open,
             req_data,
+            data_storage,
         }
+    }
+
+    pub fn data<T: Send + Sync + Clone + 'static>(&self) -> Option<&T> {
+        self.data_storage.as_ref().get_data::<T>()
     }
 
     pub async fn send(&mut self, message: WsMessage) -> Result<SendStatus, String> {

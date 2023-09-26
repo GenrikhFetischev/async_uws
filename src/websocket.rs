@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
@@ -13,16 +14,22 @@ pub struct Websocket<const SSL: bool> {
     pub stream: UnboundedReceiver<WsMessage>,
     native: WebSocketStruct<SSL>,
     uws_loop: UwsLoop,
+    is_open: Arc<AtomicBool>,
 }
 
 unsafe impl<const SSL: bool> Send for Websocket<SSL> {}
 unsafe impl<const SSL: bool> Sync for Websocket<SSL> {}
 
 impl<const SSL: bool> Websocket<SSL> {
-    pub async fn send(&mut self, message: WsMessage) -> SendStatus {
+    pub async fn send(&mut self, message: WsMessage) -> Result<SendStatus, String> {
+        let is_open = self.is_open.load(Ordering::SeqCst);
+        if !is_open {
+            return Err("WebSocket is closed!".to_string());
+        }
+
         let websocket = self.native.clone();
 
-        match message {
+        let status = match message {
             WsMessage::Message(msg, opcode) => {
                 let callback = move || websocket.send(&msg, opcode);
                 WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await
@@ -46,7 +53,9 @@ impl<const SSL: bool> Websocket<SSL> {
                 };
                 WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await
             }
-        }
+        };
+
+        Ok(status)
     }
 
     pub async fn send_with_options(
@@ -54,12 +63,16 @@ impl<const SSL: bool> Websocket<SSL> {
         message: WsMessage,
         compress: bool,
         fin: bool,
-    ) -> SendStatus {
+    ) -> Result<SendStatus, String> {
+        let is_open = self.is_open.load(Ordering::SeqCst);
+        if !is_open {
+            return Err("WebSocket is closed!".to_string());
+        }
         let websocket = self.native.clone();
         match message {
             WsMessage::Message(msg, opcode) => {
                 let callback = move || websocket.send_with_options(&msg, opcode, compress, fin);
-                WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await
+                Ok(WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await)
             }
             msg => self.send(msg).await,
         }
@@ -69,11 +82,13 @@ impl<const SSL: bool> Websocket<SSL> {
         native: WebSocketStruct<SSL>,
         uws_loop: UwsLoop,
         from_native_stream: UnboundedReceiver<WsMessage>,
+        is_open: Arc<AtomicBool>,
     ) -> Self {
         Websocket {
             stream: from_native_stream,
             native,
             uws_loop,
+            is_open,
         }
     }
 }

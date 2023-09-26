@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -20,6 +21,7 @@ pub struct WsPerConnectionUserData {
     storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
     sink: UnboundedSender<WsMessage>,
     stream: Option<UnboundedReceiver<WsMessage>>,
+    pub(crate) is_open: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +92,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                         id: user_data_id,
                         stream: Some(stream),
                         storage: ws_per_socket_data_storage.clone(),
+                        is_open: Arc::new(AtomicBool::new(true)),
                     };
 
                     let mut storage = ws_per_socket_data_storage.lock().unwrap();
@@ -114,8 +117,9 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                     .get_user_data::<WsPerConnectionUserData>()
                     .expect("[async_uws]: There is no receiver / sender pair in ws user data");
                 let stream = user_data.stream.take().unwrap();
+                let is_open = user_data.is_open.clone();
                 tokio::spawn(async move {
-                    let ws = Websocket::new(ws_connection, uws_loop, stream);
+                    let ws = Websocket::new(ws_connection, uws_loop, stream, is_open);
                     handler(ws).await;
                 });
             })),
@@ -156,6 +160,7 @@ fn close<const SSL: bool>(native_ws: WebSocketStruct<SSL>, code: i32, reason: Op
 
     let mut storage = user_data.storage.lock().unwrap();
     storage.remove(&user_data.id);
+    user_data.is_open.store(false, Ordering::SeqCst);
 }
 
 fn ping<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>) {

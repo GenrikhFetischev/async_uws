@@ -47,4 +47,36 @@ impl<const SSL: bool> HttpResponse<SSL> {
             loop_defer(uws_loop, callback);
         });
     }
+
+    pub fn write_status(&self, status: &str) {
+        if let Some(response) = self.native.as_ref() {
+            response.write_status(status);
+        }
+    }
+
+    pub fn write_header(&self, key: &str, value: &str) {
+        if let Some(response) = self.native.as_ref() {
+            response.write_header(key, value);
+        }
+    }
+
+    pub fn write_header_int(&self, key: &str, value: u64) {
+        if let Some(response) = self.native.as_ref() {
+            response.write_header_int(key, value);
+        }
+    }
+
+    pub fn end_without_body(&self, close_connection: bool) {
+        if let Some(response) = self.native.as_ref() {
+            response.end_without_body(close_connection);
+        }
+    }
+
+    pub fn has_responded(&self) -> bool {
+        if let Some(response) = self.native.as_ref() {
+            response.has_responded()
+        } else {
+            true
+        }
+    }
 }

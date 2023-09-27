@@ -56,15 +56,24 @@ impl<const SSL: bool> Websocket<SSL> {
         let uws_loop = self.uws_loop;
         tokio::spawn(async move {
             while let Some((message, compress, fin)) = to_client_stream.recv().await {
-                let is_open = self.is_open.load(Ordering::SeqCst);
-                if !is_open {
+                let websocket = self.native.clone();
+
+                let status = send_to_socket(
+                    message,
+                    compress,
+                    fin,
+                    websocket,
+                    uws_loop,
+                    self.is_open.clone(),
+                )
+                .await;
+
+                if let Err(e) = status {
+                    eprintln!("Error sending message to client: {e:#?}");
                     break;
                 }
 
-                let websocket = self.native.clone();
-
-                let status = send_to_socket(message, compress, fin, websocket, uws_loop).await;
-
+                let status = status.unwrap();
                 if status != SendStatus::Success {
                     eprintln!(
                         "Non Success status in attempt to send message to client: {status:#?}"
@@ -90,11 +99,15 @@ impl<const SSL: bool> Websocket<SSL> {
     }
 
     pub async fn send(&mut self, message: WsMessage) -> Result<SendStatus, String> {
-        let is_open = self.is_open.load(Ordering::SeqCst);
-        if !is_open {
-            return Err("WebSocket is closed!".to_string());
-        }
-        Ok(send_to_socket(message, false, true, self.native.clone(), self.uws_loop).await)
+        send_to_socket(
+            message,
+            false,
+            true,
+            self.native.clone(),
+            self.uws_loop,
+            self.is_open.clone(),
+        )
+        .await
     }
 
     pub async fn send_with_options(
@@ -107,7 +120,15 @@ impl<const SSL: bool> Websocket<SSL> {
         if !is_open {
             return Err("WebSocket is closed!".to_string());
         }
-        Ok(send_to_socket(message, compress, fin, self.native.clone(), self.uws_loop).await)
+        send_to_socket(
+            message,
+            compress,
+            fin,
+            self.native.clone(),
+            self.uws_loop,
+            self.is_open.clone(),
+        )
+        .await
     }
 }
 
@@ -160,8 +181,13 @@ async fn send_to_socket<const SSL: bool>(
     fin: bool,
     websocket: WebSocketStruct<SSL>,
     uws_loop: UwsLoop,
-) -> SendStatus {
-    match message {
+    is_open: Arc<AtomicBool>,
+) -> Result<SendStatus, String> {
+    let is_open = is_open.load(Ordering::SeqCst);
+    if !is_open {
+        return Err("WebSocket is closed!".to_string());
+    }
+    let send_status = match message {
         WsMessage::Message(msg, opcode) => {
             let callback = move || websocket.send_with_options(&msg, opcode, compress, fin);
             WebsocketSendFuture::new(Box::new(callback), uws_loop).await
@@ -190,5 +216,6 @@ async fn send_to_socket<const SSL: bool>(
             };
             WebsocketSendFuture::new(Box::new(callback), uws_loop).await
         }
-    }
+    };
+    Ok(send_status)
 }

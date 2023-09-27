@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use tokio::time::sleep;
+use uwebsockets_rs::listen_socket::ListenSocket;
 
 use async_uws::app::App;
 use async_uws::data_storage::DataStorage;
@@ -34,7 +35,7 @@ async fn main() {
         data: "String containing data".to_string(),
     };
 
-    let mut app = App::new(opts);
+    let mut app = App::new(opts, None);
     let compressor: u32 = CompressOptions::SharedCompressor.into();
     let decompressor: u32 = CompressOptions::SharedDecompressor.into();
     let route_settings = WsRouteSettings {
@@ -89,7 +90,7 @@ async fn main() {
         )
         .ws("/ws-test", route_settings.clone(), handler_ws, upgrade_hook)
         .ws("/split", route_settings, ws_split, upgrade_hook)
-        .listen(3001, None::<fn()>)
+        .listen(3001, None::<fn(ListenSocket)>)
         .run();
 }
 

@@ -3,9 +3,11 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use tokio::sync::oneshot::Receiver;
 use uwebsockets_rs::app::Application as NativeApp;
 use uwebsockets_rs::http_request::HttpRequest;
 use uwebsockets_rs::http_response::HttpResponseStruct;
+use uwebsockets_rs::listen_socket::{listen_socket_close, ListenSocket};
 use uwebsockets_rs::us_socket_context_options::UsSocketContextOptions;
 use uwebsockets_rs::uws_loop::{get_loop, UwsLoop};
 
@@ -24,10 +26,14 @@ pub struct AppStruct<const SSL: bool> {
     uws_loop: UwsLoop,
     native_app: NativeApp<SSL>,
     ws_per_connection_user_data_storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
+    shutdown_stream: Option<Receiver<()>>,
 }
 
 impl<const SSL: bool> AppStruct<SSL> {
-    pub fn new(sockets_config: UsSocketContextOptions) -> Self {
+    pub fn new(
+        sockets_config: UsSocketContextOptions,
+        shutdown_stream: Option<Receiver<()>>,
+    ) -> Self {
         let uws_loop = get_loop();
         let native_app = NativeApp::<SSL>::new(sockets_config);
         AppStruct {
@@ -36,6 +42,7 @@ impl<const SSL: bool> AppStruct<SSL> {
             uws_loop,
             native_app,
             ws_per_connection_user_data_storage: Default::default(),
+            shutdown_stream,
         }
     }
 
@@ -188,8 +195,25 @@ impl<const SSL: bool> AppStruct<SSL> {
         self.native_app.run();
     }
 
-    pub fn listen(&mut self, port: u16, handler: Option<impl Fn() + Unpin + 'static>) -> &mut Self {
-        self.native_app.listen(port as i32, handler);
+    pub fn listen(
+        &mut self,
+        port: u16,
+        handler: Option<impl FnOnce(ListenSocket) + Unpin + 'static>,
+    ) -> &mut Self {
+        let shutdown_stream = self.shutdown_stream.take();
+        let listen_callback = move |listen_socket: ListenSocket| {
+            if let Some(handler) = handler {
+                handler(listen_socket)
+            }
+
+            tokio::spawn(async move {
+                if let Some(stream) = shutdown_stream {
+                    let _ = stream.await;
+                    listen_socket_close::<SSL>(listen_socket)
+                }
+            });
+        };
+        self.native_app.listen(port as i32, Some(listen_callback));
         self
     }
 }

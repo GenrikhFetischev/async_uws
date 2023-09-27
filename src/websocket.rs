@@ -52,6 +52,10 @@ impl<const SSL: bool> Websocket<SSL> {
         self.data_storage.as_ref().get_data::<T>()
     }
 
+    pub fn is_open(&self) -> bool {
+        self.is_open.load(Ordering::SeqCst)
+    }
+
     pub async fn send(&mut self, message: WsMessage) -> Result<SendStatus, String> {
         let is_open = self.is_open.load(Ordering::SeqCst);
         if !is_open {

@@ -13,17 +13,11 @@ use crate::ws_message::WsMessage;
 
 pub struct Websocket<const SSL: bool> {
     pub stream: UnboundedReceiver<WsMessage>,
-    pub req_data: RequestData,
     native: WebSocketStruct<SSL>,
     uws_loop: UwsLoop,
     is_open: Arc<AtomicBool>,
-    pub data_storage: SharedDataStorage,
-}
-
-#[derive(Debug)]
-pub struct RequestData {
-    pub full_url: String,
-    pub headers: Vec<(String, String)>,
+    global_data_storage: SharedDataStorage,
+    per_connection_data_storage: SharedDataStorage,
 }
 
 unsafe impl<const SSL: bool> Send for Websocket<SSL> {}
@@ -35,21 +29,25 @@ impl<const SSL: bool> Websocket<SSL> {
         uws_loop: UwsLoop,
         from_native_stream: UnboundedReceiver<WsMessage>,
         is_open: Arc<AtomicBool>,
-        req_data: RequestData,
-        data_storage: SharedDataStorage,
+        global_data_storage: SharedDataStorage,
+        per_connection_data_storage: SharedDataStorage,
     ) -> Self {
         Websocket {
             stream: from_native_stream,
             native,
             uws_loop,
             is_open,
-            req_data,
-            data_storage,
+            global_data_storage,
+            per_connection_data_storage,
         }
     }
 
     pub fn data<T: Send + Sync + Clone + 'static>(&self) -> Option<&T> {
-        self.data_storage.as_ref().get_data::<T>()
+        self.global_data_storage.as_ref().get_data::<T>()
+    }
+
+    pub fn connection_data<T: Send + Sync + Clone + 'static>(&self) -> Option<&T> {
+        self.per_connection_data_storage.as_ref().get_data::<T>()
     }
 
     pub fn is_open(&self) -> bool {

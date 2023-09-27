@@ -20,7 +20,7 @@ pub type AppSSL = AppStruct<true>;
 
 pub struct AppStruct<const SSL: bool> {
     data_storage: Option<DataStorage>,
-    shared_data_storage: Option<SharedDataStorage>,
+    global_data_storage: Option<SharedDataStorage>,
     uws_loop: UwsLoop,
     native_app: NativeApp<SSL>,
     ws_per_connection_user_data_storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
@@ -32,7 +32,7 @@ impl<const SSL: bool> AppStruct<SSL> {
         let native_app = NativeApp::<SSL>::new(sockets_config);
         AppStruct {
             data_storage: Some(Default::default()),
-            shared_data_storage: Default::default(),
+            global_data_storage: Default::default(),
             uws_loop,
             native_app,
             ws_per_connection_user_data_storage: Default::default(),
@@ -43,7 +43,7 @@ impl<const SSL: bool> AppStruct<SSL> {
     where
         T: Sync + Send + Clone + 'static,
     {
-        if self.shared_data_storage.is_some() {
+        if self.global_data_storage.is_some() {
             panic!("All app.data() methods should be called before routes initialization");
         }
         self.data_storage.as_mut().unwrap().add_data(data);
@@ -51,31 +51,34 @@ impl<const SSL: bool> AppStruct<SSL> {
     }
 
     fn get_shared_data_storage(&mut self) -> SharedDataStorage {
-        if let Some(shared_storage) = self.shared_data_storage.as_ref() {
+        if let Some(shared_storage) = self.global_data_storage.as_ref() {
             return shared_storage.clone();
         }
 
         let data_storage = self.data_storage.take().unwrap();
-        self.shared_data_storage = Some(data_storage.into());
+        self.global_data_storage = Some(data_storage.into());
 
-        self.shared_data_storage.as_ref().unwrap().clone()
+        self.global_data_storage.as_ref().unwrap().clone()
     }
 
-    pub fn ws<T, W>(
+    pub fn ws<T, W, U>(
         &mut self,
         pattern: &str,
         route_settings: WsRouteSettings,
         connection_handler: T,
+        upgrade_hook: U,
     ) -> &mut Self
     where
         T: (Fn(Websocket<SSL>) -> W) + 'static + Send + Sync + Clone,
         W: Future<Output = ()> + 'static + Send,
+        U: Fn(&mut HttpRequest, &mut DataStorage) + 'static + Send + Sync + Clone,
     {
         let ws_behavior = WebsocketBehavior::new(
             route_settings,
             self.uws_loop,
             self.ws_per_connection_user_data_storage.clone(),
             connection_handler,
+            upgrade_hook,
             self.get_shared_data_storage(),
         );
         self.native_app.ws(pattern, ws_behavior.native_ws_behaviour);
@@ -206,8 +209,8 @@ where
     };
 
     let handler = move |mut res: HttpResponseStruct<SSL>, req: HttpRequest| {
-        let is_aborted = Arc::new(AtomicBool::new(false));
         let data_storage = data_storage.clone();
+        let is_aborted = Arc::new(AtomicBool::new(false));
         let is_aborted_to_move = is_aborted.clone();
         res.on_aborted(move || {
             is_aborted_to_move.store(true, Ordering::Relaxed);

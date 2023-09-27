@@ -1,11 +1,12 @@
 use std::time::Duration;
 
 use tokio::time::sleep;
-use uwebsockets_rs::websocket::Opcode;
 
 use async_uws::app::App;
 use async_uws::http_request::HttpRequest;
 use async_uws::http_response::HttpResponse;
+use async_uws::uwebsockets_rs::CompressOptions;
+use async_uws::uwebsockets_rs::Opcode;
 use async_uws::uwebsockets_rs::UsSocketContextOptions;
 use async_uws::websocket::Websocket;
 use async_uws::ws_behavior::WsRouteSettings;
@@ -33,7 +34,18 @@ async fn main() {
     };
 
     let mut app = App::new(opts);
-    let route_settings = WsRouteSettings::default();
+    let compressor: u32 = CompressOptions::SharedCompressor.into();
+    let decompressor: u32 = CompressOptions::SharedDecompressor.into();
+    let route_settings = WsRouteSettings {
+        compression: Some(compressor | decompressor),
+        max_payload_length: Some(1024),
+        idle_timeout: Some(800),
+        max_backpressure: Some(10),
+        close_on_backpressure_limit: Some(false),
+        reset_idle_timeout_on_send: Some(true),
+        send_pings_automatically: Some(true),
+        max_lifetime: Some(111),
+    };
     app.data(shared_data);
 
     app.get("/get", get_handler)

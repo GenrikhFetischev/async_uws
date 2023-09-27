@@ -87,7 +87,8 @@ async fn main() {
                 per_connection_storage.add_data(upgrade_req_info);
             },
         )
-        .ws("/ws-test", route_settings, handler_ws, upgrade_hook)
+        .ws("/ws-test", route_settings.clone(), handler_ws, upgrade_hook)
+        .ws("/split", route_settings, ws_split, upgrade_hook)
         .listen(3001, None::<fn()>)
         .run();
 }
@@ -161,4 +162,22 @@ async fn handler_ws(mut ws: Websocket<false>) {
         .unwrap();
     }
     println!("Done with that websocket!");
+}
+
+async fn ws_split(ws: Websocket<false>) {
+    let (sink, mut stream) = ws.split();
+    tokio::spawn(async move {
+        loop {
+            if let Err(e) = sink.send(("Hello! I'm timer".into(), false, true)) {
+                println!("Error send to socket:{e:#?}");
+                break;
+            }
+
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+
+    while let Some(message) = stream.recv().await {
+        println!("Incoming: {message:#?}")
+    }
 }

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket::{Opcode, SendStatus, WebSocketStruct};
 
@@ -42,6 +42,41 @@ impl<const SSL: bool> Websocket<SSL> {
         }
     }
 
+    /***
+     * Returns sink & stream. Sink accepts (WsMessage, bool, bool) where fist bool is 'compress' param and second 'fin' (Like in 'send_with_option' method)
+     ***/
+    pub fn split(
+        self,
+    ) -> (
+        UnboundedSender<(WsMessage, bool, bool)>,
+        UnboundedReceiver<WsMessage>,
+    ) {
+        let (to_client_sink, mut to_client_stream) = unbounded_channel::<(WsMessage, bool, bool)>();
+
+        let uws_loop = self.uws_loop;
+        tokio::spawn(async move {
+            while let Some((message, compress, fin)) = to_client_stream.recv().await {
+                let is_open = self.is_open.load(Ordering::SeqCst);
+                if !is_open {
+                    break;
+                }
+
+                let websocket = self.native.clone();
+
+                let status = send_to_socket(message, compress, fin, websocket, uws_loop).await;
+
+                if status != SendStatus::Success {
+                    eprintln!(
+                        "Non Success status in attempt to send message to client: {status:#?}"
+                    );
+                    break;
+                }
+            }
+        });
+
+        (to_client_sink, self.stream)
+    }
+
     pub fn data<T: Send + Sync + Clone + 'static>(&self) -> Option<&T> {
         self.global_data_storage.as_ref().get_data::<T>()
     }
@@ -59,36 +94,7 @@ impl<const SSL: bool> Websocket<SSL> {
         if !is_open {
             return Err("WebSocket is closed!".to_string());
         }
-
-        let websocket = self.native.clone();
-
-        let status = match message {
-            WsMessage::Message(msg, opcode) => {
-                let callback = move || websocket.send(&msg, opcode);
-                WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await
-            }
-            WsMessage::Ping(msg) => {
-                let callback = move || websocket.send(&msg.unwrap_or_default(), Opcode::Ping);
-                WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await
-            }
-            WsMessage::Pong(msg) => {
-                let callback = move || websocket.send(&msg.unwrap_or_default(), Opcode::Pong);
-                WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await
-            }
-            WsMessage::Close(_code, reason) => {
-                let callback = move || {
-                    let reason_bytes = reason
-                        .map(|reason| Vec::from(reason.as_bytes()))
-                        .unwrap_or_default();
-                    let send_status = websocket.send(&reason_bytes, Opcode::Close);
-                    websocket.close();
-                    send_status
-                };
-                WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await
-            }
-        };
-
-        Ok(status)
+        Ok(send_to_socket(message, false, true, self.native.clone(), self.uws_loop).await)
     }
 
     pub async fn send_with_options(
@@ -101,14 +107,7 @@ impl<const SSL: bool> Websocket<SSL> {
         if !is_open {
             return Err("WebSocket is closed!".to_string());
         }
-        let websocket = self.native.clone();
-        match message {
-            WsMessage::Message(msg, opcode) => {
-                let callback = move || websocket.send_with_options(&msg, opcode, compress, fin);
-                Ok(WebsocketSendFuture::new(Box::new(callback), self.uws_loop).await)
-            }
-            msg => self.send(msg).await,
-        }
+        Ok(send_to_socket(message, compress, fin, self.native.clone(), self.uws_loop).await)
     }
 }
 
@@ -152,5 +151,44 @@ impl Future for WebsocketSendFuture {
         }
         state.waker = Some(cx.waker().clone());
         Poll::Pending
+    }
+}
+
+async fn send_to_socket<const SSL: bool>(
+    message: WsMessage,
+    compress: bool,
+    fin: bool,
+    websocket: WebSocketStruct<SSL>,
+    uws_loop: UwsLoop,
+) -> SendStatus {
+    match message {
+        WsMessage::Message(msg, opcode) => {
+            let callback = move || websocket.send_with_options(&msg, opcode, compress, fin);
+            WebsocketSendFuture::new(Box::new(callback), uws_loop).await
+        }
+        WsMessage::Ping(msg) => {
+            let callback = move || {
+                websocket.send_with_options(&msg.unwrap_or_default(), Opcode::Ping, false, true)
+            };
+            WebsocketSendFuture::new(Box::new(callback), uws_loop).await
+        }
+        WsMessage::Pong(msg) => {
+            let callback = move || {
+                websocket.send_with_options(&msg.unwrap_or_default(), Opcode::Pong, false, true)
+            };
+            WebsocketSendFuture::new(Box::new(callback), uws_loop).await
+        }
+        WsMessage::Close(_code, reason) => {
+            let callback = move || {
+                let reason_bytes = reason
+                    .map(|reason| Vec::from(reason.as_bytes()))
+                    .unwrap_or_default();
+                let send_status =
+                    websocket.send_with_options(&reason_bytes, Opcode::Close, false, true);
+                websocket.close();
+                send_status
+            };
+            WebsocketSendFuture::new(Box::new(callback), uws_loop).await
+        }
     }
 }

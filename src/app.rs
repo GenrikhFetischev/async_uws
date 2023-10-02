@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use tokio::sync::oneshot::Receiver;
 use uwebsockets_rs::app::Application as NativeApp;
@@ -15,7 +14,7 @@ use crate::data_storage::{DataStorage, SharedDataStorage};
 use crate::http_response::HttpResponse;
 use crate::send_ptr::SendPtr;
 use crate::websocket::Websocket;
-use crate::ws_behavior::{WebsocketBehavior, WsPerConnectionUserData, WsRouteSettings};
+use crate::ws_behavior::{WebsocketBehavior, WsPerSocketUserDataStorage, WsRouteSettings};
 
 pub type App = AppStruct<false>;
 pub type AppSSL = AppStruct<true>;
@@ -25,7 +24,7 @@ pub struct AppStruct<const SSL: bool> {
     global_data_storage: Option<SharedDataStorage>,
     uws_loop: UwsLoop,
     native_app: NativeApp<SSL>,
-    ws_per_connection_user_data_storage: Arc<Mutex<HashMap<usize, WsPerConnectionUserData>>>,
+    ws_per_connection_user_data_storage: WsPerSocketUserDataStorage,
     shutdown_stream: Option<Receiver<()>>,
 }
 

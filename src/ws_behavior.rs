@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::http_request::HttpRequest;
@@ -9,7 +9,7 @@ use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket::{Opcode, WebSocketStruct};
 use uwebsockets_rs::websocket_behavior::{
-    CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
+  CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
 };
 
 use crate::data_storage::{DataStorage, SharedDataStorage};
@@ -197,7 +197,7 @@ fn message<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: &[u8], opc
     user_data
         .sink
         .send(WsMessage::Message(Vec::from(message), opcode))
-        .unwrap();
+        .unwrap_or_default();
 }
 
 fn close<const SSL: bool>(native_ws: WebSocketStruct<SSL>, code: i32, reason: Option<&str>) {
@@ -208,7 +208,7 @@ fn close<const SSL: bool>(native_ws: WebSocketStruct<SSL>, code: i32, reason: Op
     user_data
         .sink
         .send(WsMessage::Close(code, reason.map(String::from)))
-        .unwrap();
+        .unwrap_or_default();
 
     let mut storage = user_data.storage.lock().unwrap();
     storage.remove(&user_data.id);
@@ -223,7 +223,7 @@ fn ping<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>
     user_data
         .sink
         .send(WsMessage::Ping(message.map(Vec::from)))
-        .unwrap();
+        .unwrap_or_default();
 }
 
 fn pong<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>) {
@@ -234,7 +234,7 @@ fn pong<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>
     user_data
         .sink
         .send(WsMessage::Pong(message.map(Vec::from)))
-        .unwrap();
+        .unwrap_or_default();
 }
 
 fn drain<const SSL: bool>(_native_ws: WebSocketStruct<SSL>) {

@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "async_uws"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "tokio",
  "uwebsockets_rs",

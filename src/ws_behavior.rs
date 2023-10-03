@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::http_request::HttpRequest;
@@ -9,25 +9,25 @@ use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket::{Opcode, WebSocketStruct};
 use uwebsockets_rs::websocket_behavior::{
-    CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
+  CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
 };
 
 use crate::data_storage::{DataStorage, SharedDataStorage};
 use crate::websocket::Websocket;
 use crate::ws_message::WsMessage;
 
-pub type SharedWsPerSocketUserData = Arc<RwLock<WsPerSocketUserData>>;
-pub type WsPerSocketUserDataStorage = Arc<Mutex<HashMap<usize, Arc<RwLock<WsPerSocketUserData>>>>>;
+pub type SharedWsPerSocketUserData = Box<WsPerSocketUserData>;
+pub type WsPerSocketUserDataStorage = Arc<Mutex<HashMap<String, SharedWsPerSocketUserData>>>;
 
 #[derive(Debug)]
 pub struct WsPerSocketUserData {
-    id: usize,
+    id: String,
     storage: WsPerSocketUserDataStorage,
     sink: UnboundedSender<WsMessage>,
     stream: Option<UnboundedReceiver<WsMessage>>,
     is_open: Arc<AtomicBool>,
     shared_data_storage: SharedDataStorage,
-    per_connection_user_data: SharedDataStorage,
+    custom_user_data: SharedDataStorage,
 }
 
 #[derive(Debug, Clone)]
@@ -110,24 +110,26 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
 
                     tokio::spawn(async move {
                         let (sink, stream) = unbounded_channel::<WsMessage>();
-                        let user_data_id = ctx.get_context_ptr() as usize;
+                        let user_data_id = ws_key_string.to_owned();
 
-                        let mut per_connection_user_data = DataStorage::default();
-                        upgrade_hook(&mut req, &mut per_connection_user_data);
+                        let mut custom_user_data = DataStorage::default();
+                        upgrade_hook(&mut req, &mut custom_user_data);
 
                         let user_data = WsPerSocketUserData {
                             sink,
-                            id: user_data_id,
+                            id: user_data_id.to_owned(),
                             stream: Some(stream),
                             storage: ws_per_socket_data_storage.clone(),
                             is_open: Arc::new(AtomicBool::new(true)),
                             shared_data_storage: global_data_storage.clone(),
-                            per_connection_user_data: per_connection_user_data.into(),
+                            custom_user_data: custom_user_data.into(),
                         };
 
                         let storage_to_move = ws_per_socket_data_storage.clone();
-                        let mut storage = ws_per_socket_data_storage.lock().unwrap();
-                        storage.insert(user_data_id, Arc::new(RwLock::new(user_data)));
+                        {
+                            let mut storage = ws_per_socket_data_storage.lock().unwrap();
+                            storage.insert(user_data_id.to_owned(), Box::new(user_data));
+                        }
 
                         let is_aborted = is_aborted.load(Ordering::SeqCst);
                         if is_aborted {
@@ -137,7 +139,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
 
                         let callback = move || {
                             let mut storage = storage_to_move.lock().unwrap();
-                            let user_data_ref = storage.get_mut(&user_data_id).unwrap();
+                            let user_data_ref = storage.get_mut(&user_data_id).unwrap().as_mut();
                             let ws_protocol: Option<&str> = ws_protocol.as_deref();
                             let ws_extensions: Option<&str> = ws_extensions.as_deref();
 
@@ -159,15 +161,14 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                 let uws_loop = uws_loop;
 
                 let user_data = ws_connection
-                    .get_user_data::<SharedWsPerSocketUserData>()
-                    .expect("[async_uws]: There is no receiver / sender pair in ws user data")
-                    .clone();
-                let mut user_data = user_data.write().unwrap();
+                    .get_user_data::<WsPerSocketUserData>()
+                    .expect("[async_uws]: There is no receiver / sender pair in ws user data");
+
 
                 let stream = user_data.stream.take().unwrap();
                 let is_open = user_data.is_open.clone();
                 let data_storage = user_data.shared_data_storage.clone();
-                let per_connection_data_storage = user_data.per_connection_user_data.clone();
+                let per_connection_data_storage = user_data.custom_user_data.clone();
                 tokio::spawn(async move {
                     let ws = Websocket::new(
                         ws_connection,
@@ -196,9 +197,9 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
 
 fn message<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: &[u8], opcode: Opcode) {
     let user_data = native_ws
-        .get_user_data::<SharedWsPerSocketUserData>()
+        .get_user_data::<WsPerSocketUserData>()
         .expect("[async_uws]: There is no receiver / sender pair in ws user data");
-    let user_data = user_data.read().unwrap();
+
 
     user_data
         .sink
@@ -208,25 +209,25 @@ fn message<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: &[u8], opc
 
 fn close<const SSL: bool>(native_ws: WebSocketStruct<SSL>, code: i32, reason: Option<&str>) {
     let user_data = native_ws
-        .get_user_data::<SharedWsPerSocketUserData>()
+        .get_user_data::<WsPerSocketUserData>()
         .expect("[async_uws]: There is no receiver / sender pair in ws user data");
-    let user_data = user_data.read().unwrap();
+
 
     user_data
         .sink
         .send(WsMessage::Close(code, reason.map(String::from)))
         .unwrap_or_default();
+    user_data.is_open.store(false, Ordering::SeqCst);
 
     let mut storage = user_data.storage.lock().unwrap();
     storage.remove(&user_data.id);
-    user_data.is_open.store(false, Ordering::SeqCst);
 }
 
 fn ping<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>) {
     let user_data = native_ws
-        .get_user_data::<SharedWsPerSocketUserData>()
+        .get_user_data::<WsPerSocketUserData>()
         .expect("[async_uws]: There is no receiver / sender pair in ws user data");
-    let user_data = user_data.read().unwrap();
+
 
     user_data
         .sink
@@ -236,9 +237,9 @@ fn ping<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>
 
 fn pong<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>) {
     let user_data = native_ws
-        .get_user_data::<SharedWsPerSocketUserData>()
+        .get_user_data::<WsPerSocketUserData>()
         .expect("[async_uws]: There is no receiver / sender pair in ws user data");
-    let user_data = user_data.read().unwrap();
+
 
     user_data
         .sink

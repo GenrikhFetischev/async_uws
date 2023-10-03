@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -204,15 +204,10 @@ async fn send_to_socket<const SSL: bool>(
             };
             WebsocketSendFuture::new(Box::new(callback), uws_loop).await
         }
-        WsMessage::Close(_code, reason) => {
+        WsMessage::Close(code, reason) => {
             let callback = move || {
-                let reason_bytes = reason
-                    .map(|reason| Vec::from(reason.as_bytes()))
-                    .unwrap_or_default();
-                let send_status =
-                    websocket.send_with_options(&reason_bytes, Opcode::Close, false, true);
-                websocket.close();
-                send_status
+                websocket.end(code, reason.as_deref());
+                SendStatus::Success
             };
             WebsocketSendFuture::new(Box::new(callback), uws_loop).await
         }

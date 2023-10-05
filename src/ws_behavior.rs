@@ -108,7 +108,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                     let global_data_storage = global_data_storage.clone();
                     let mut custom_user_data = DataStorage::default();
                     upgrade_hook(&mut req, &mut custom_user_data);
-                    
+
                     tokio::spawn(async move {
                         let (sink, stream) = unbounded_channel::<WsMessage>();
                         let user_data_id = ws_key_string.to_owned();

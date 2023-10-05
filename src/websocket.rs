@@ -69,14 +69,14 @@ impl<const SSL: bool> Websocket<SSL> {
                 .await;
 
                 if let Err(e) = status {
-                    eprintln!("Error sending message to client: {e:#?}");
+                    eprintln!("[async_uws] Error sending message to client: {e:#?}");
                     break;
                 }
 
                 let status = status.unwrap();
                 if status != SendStatus::Success {
                     eprintln!(
-                        "Non Success status in attempt to send message to client: {status:#?}"
+                        "[async_uws] Non Success status in attempt to send message to client: {status:#?}"
                     );
                     break;
                 }

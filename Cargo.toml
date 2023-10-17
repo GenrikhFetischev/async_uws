@@ -17,7 +17,7 @@ debug = true
 
 
 [dependencies]
-uwebsockets_rs = { version = "0.0.8", path = "../uwebsockets_rs", features = ["native-access"] }
+uwebsockets_rs = { version = "0.0.9", path = "../uwebsockets_rs", features = ["native-access"] }
 tokio = { version = "1.28.1", features = ["full"] }
 
 

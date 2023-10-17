@@ -1,12 +1,13 @@
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::oneshot::Receiver;
 use uwebsockets_rs::app::Application as NativeApp;
+use uwebsockets_rs::app_close::app_close;
 use uwebsockets_rs::http_request::HttpRequest;
 use uwebsockets_rs::http_response::HttpResponseStruct;
-use uwebsockets_rs::listen_socket::{listen_socket_close, ListenSocket};
+use uwebsockets_rs::listen_socket::ListenSocket;
 use uwebsockets_rs::us_socket_context_options::UsSocketContextOptions;
 use uwebsockets_rs::uws_loop::{get_loop, UwsLoop};
 
@@ -200,19 +201,14 @@ impl<const SSL: bool> AppStruct<SSL> {
         handler: Option<impl FnOnce(ListenSocket) + Unpin + 'static>,
     ) -> &mut Self {
         let shutdown_stream = self.shutdown_stream.take();
-        let listen_callback = move |listen_socket: ListenSocket| {
-            if let Some(handler) = handler {
-                handler(listen_socket)
+        let native = self.native_app.get_native_app();
+        tokio::spawn(async move {
+            if let Some(stream) = shutdown_stream {
+                let _ = stream.await;
+                app_close::<SSL>(native);
             }
-
-            tokio::spawn(async move {
-                if let Some(stream) = shutdown_stream {
-                    let _ = stream.await;
-                    listen_socket_close::<SSL>(listen_socket)
-                }
-            });
-        };
-        self.native_app.listen(port as i32, Some(listen_callback));
+        });
+        self.native_app.listen(port as i32, handler);
         self
     }
 }
@@ -241,6 +237,7 @@ where
 
         tokio::spawn(async move {
             let res = HttpResponse::new(res, uws_loop, is_aborted, data_storage.clone());
+            #[allow(clippy::redundant_locals)]
             let handler_wrapper = handler_wrapper;
             let handler = unsafe { handler_wrapper.ptr.as_ref().unwrap() };
             handler(res, req).await;

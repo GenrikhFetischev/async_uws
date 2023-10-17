@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use tokio::sync::broadcast::Sender;
+use tokio::sync::{broadcast, oneshot};
 use tokio::time::sleep;
-use uwebsockets_rs::listen_socket::ListenSocket;
 
 use async_uws::app::App;
 use async_uws::data_storage::DataStorage;
@@ -35,7 +36,15 @@ async fn main() {
         data: "String containing data".to_string(),
     };
 
-    let mut app = App::new(opts, None);
+    let (sink, stream) = oneshot::channel::<()>();
+    let (b_sink, mut b_stream) = broadcast::channel::<()>(1);
+    tokio::spawn(async move {
+        let _ = b_stream.recv().await;
+        println!("!!!!");
+        sink.send(()).unwrap();
+    });
+
+    let mut app = App::new(opts, Some(stream));
     let compressor: u32 = CompressOptions::SharedCompressor.into();
     let decompressor: u32 = CompressOptions::SharedDecompressor.into();
     let route_settings = WsRouteSettings {
@@ -49,6 +58,7 @@ async fn main() {
         max_lifetime: Some(111),
     };
     app.data(shared_data);
+    app.data(b_sink);
 
     app.get("/get", get_handler)
         .post("/x", move |res, _req| async {
@@ -67,11 +77,23 @@ async fn main() {
             "/ws",
             route_settings.clone(),
             |mut ws| async move {
+                let b_sink = ws.data::<Sender<()>>().unwrap().clone();
                 let status = ws.send("hello".into()).await;
                 println!("Send status: {status:#?}");
+
                 while let Some(msg) = ws.stream.recv().await {
                     println!("{msg:#?}");
-                    ws.send(msg).await.unwrap();
+                    if let WsMessage::Message(data, _) = msg {
+                        println!("{data:#?}");
+                        b_sink.send(()).unwrap();
+                    };
+                    let status = ws
+                        .send(WsMessage::Message(
+                            "asdfasdf".as_bytes().to_vec(),
+                            Opcode::Text,
+                        ))
+                        .await;
+                    println!("{status:#?}");
                 }
             },
             |req, per_connection_storage| {
@@ -90,8 +112,14 @@ async fn main() {
         )
         .ws("/ws-test", route_settings.clone(), handler_ws, upgrade_hook)
         .ws("/split", route_settings, ws_split, upgrade_hook)
-        .listen(3001, None::<fn(ListenSocket)>)
+        .listen(
+            3001,
+            Some(|listen_socket| {
+                println!("{listen_socket:#?}");
+            }),
+        )
         .run();
+    println!("Server exiting");
 }
 
 fn upgrade_hook(req: &mut HttpRequest, per_connection_storage: &mut DataStorage) {

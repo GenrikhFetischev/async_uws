@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::http_request::HttpRequest;
@@ -9,7 +9,7 @@ use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket::{Opcode, WebSocketStruct};
 use uwebsockets_rs::websocket_behavior::{
-    CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
+  CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
 };
 
 use crate::data_storage::{DataStorage, SharedDataStorage};
@@ -156,8 +156,6 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
             )),
             open: Some(Box::new(move |ws_connection| {
                 let handler = handler.clone();
-                let uws_loop = uws_loop;
-
                 let user_data = ws_connection
                     .get_user_data::<WsPerSocketUserData>()
                     .expect("[async_uws]: There is no receiver / sender pair in ws user data");

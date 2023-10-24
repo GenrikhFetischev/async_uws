@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use tokio::sync::broadcast::Sender;
 use tokio::sync::{broadcast, oneshot};
+use tokio::sync::broadcast::Sender;
 use tokio::time::sleep;
 
 use async_uws::app::App;
@@ -96,22 +96,22 @@ async fn main() {
                     println!("{status:#?}");
                 }
             },
-            |req, per_connection_storage| {
-                let full_url = req.get_full_url().to_string();
-                let headers: Vec<(String, String)> = req
-                    .get_headers()
-                    .clone()
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect();
-
-                let upgrade_req_info = UpgradeReqInfo { full_url, headers };
-
-                per_connection_storage.add_data(upgrade_req_info);
+            |req, res| {
+                custom_upgrade(req, res);
             },
         )
-        .ws("/ws-test", route_settings.clone(), handler_ws, upgrade_hook)
-        .ws("/split", route_settings, ws_split, upgrade_hook)
+        .ws(
+            "/ws-test",
+            route_settings.clone(),
+            handler_ws,
+            custom_upgrade,
+        )
+        .ws(
+            "/split",
+            route_settings,
+            ws_split,
+            HttpResponse::default_upgrade,
+        )
         .listen(
             3001,
             Some(|listen_socket| {
@@ -122,7 +122,14 @@ async fn main() {
     println!("Server exiting");
 }
 
-fn upgrade_hook(req: &mut HttpRequest, per_connection_storage: &mut DataStorage) {
+fn custom_upgrade(mut req: HttpRequest, res: HttpResponse<false>) {
+    let ws_key_string = req
+        .get_header("sec-websocket-key")
+        .expect("[async_uws]: There is no sec-websocket-key in req headers")
+        .to_string();
+    let ws_protocol = req.get_header("sec-websocket-protocol").map(String::from);
+    let ws_extensions = req.get_header("sec-websocket-extensions").map(String::from);
+
     let full_url = req.get_full_url().to_string();
     let headers: Vec<(String, String)> = req
         .get_headers()
@@ -132,8 +139,16 @@ fn upgrade_hook(req: &mut HttpRequest, per_connection_storage: &mut DataStorage)
         .collect();
 
     let upgrade_req_info = UpgradeReqInfo { full_url, headers };
+    let mut connection_data_storage = DataStorage::new();
 
-    per_connection_storage.add_data(upgrade_req_info);
+    connection_data_storage.add_data(upgrade_req_info);
+
+    res.upgrade(
+        ws_key_string,
+        ws_protocol,
+        ws_extensions,
+        Some(connection_data_storage.into()),
+    );
 }
 
 #[derive(Debug, Clone)]
@@ -156,7 +171,10 @@ async fn handler_ws(mut ws: Websocket<false>) {
     let data = ws.data::<SharedData>().unwrap();
     println!("!!! Global Shared data: {}", data.data);
     let per_connection_data = ws.connection_data::<UpgradeReqInfo>().unwrap();
-    println!("!!! Global Shared data: {:#?}", per_connection_data);
+    println!(
+        "!!! Upgrade url: {:#?}, headers: {:#?}",
+        per_connection_data.full_url, per_connection_data.headers
+    );
 
     while let Some(msg) = ws.stream.recv().await {
         match msg {

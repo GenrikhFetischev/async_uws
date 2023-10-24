@@ -3,16 +3,17 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::http_request::HttpRequest;
 use uwebsockets_rs::http_response::HttpResponseStruct;
-use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
+use uwebsockets_rs::uws_loop::UwsLoop;
 use uwebsockets_rs::websocket::{Opcode, WebSocketStruct};
 use uwebsockets_rs::websocket_behavior::{
-  CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
+    CompressOptions, UpgradeContext, WebSocketBehavior as NativeWebSocketBehavior,
 };
 
-use crate::data_storage::{DataStorage, SharedDataStorage};
+use crate::data_storage::SharedDataStorage;
+use crate::http_response::HttpResponse;
 use crate::websocket::Websocket;
 use crate::ws_message::WsMessage;
 
@@ -21,13 +22,13 @@ pub type WsPerSocketUserDataStorage = Arc<Mutex<HashMap<String, SharedWsPerSocke
 
 #[derive(Debug)]
 pub struct WsPerSocketUserData {
-    id: String,
-    storage: WsPerSocketUserDataStorage,
-    sink: UnboundedSender<WsMessage>,
-    stream: Option<UnboundedReceiver<WsMessage>>,
-    is_open: Arc<AtomicBool>,
-    shared_data_storage: SharedDataStorage,
-    custom_user_data: SharedDataStorage,
+    pub(crate) id: String,
+    pub(crate) storage: WsPerSocketUserDataStorage,
+    pub(crate) sink: UnboundedSender<WsMessage>,
+    pub(crate) stream: Option<UnboundedReceiver<WsMessage>>,
+    pub(crate) is_open: Arc<AtomicBool>,
+    pub(crate) shared_data_storage: SharedDataStorage,
+    pub(crate) custom_user_data: SharedDataStorage,
 }
 
 #[derive(Debug, Clone)]
@@ -74,7 +75,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
     ) -> Self
     where
         H: (Fn(Websocket<SSL>) -> R) + 'static + Send + Sync + Clone,
-        U: Fn(&mut HttpRequest, &mut DataStorage) + 'static + Send + Sync + Clone,
+        U: Fn(HttpRequest, HttpResponse<SSL>) + 'static + Send + Sync + Clone,
         R: Future<Output = ()> + 'static + Send,
     {
         let native_ws_behaviour = NativeWebSocketBehavior {
@@ -87,71 +88,22 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
             send_pings_automatically: settings.send_pings_automatically.unwrap_or_default(),
             max_lifetime: settings.max_lifetime.unwrap_or_default(),
             upgrade: Some(Box::new(
-                move |mut res: HttpResponseStruct<SSL>,
-                      mut req: HttpRequest,
-                      ctx: UpgradeContext| {
+                move |mut res: HttpResponseStruct<SSL>, req: HttpRequest, ctx: UpgradeContext| {
                     let is_aborted = Arc::new(AtomicBool::new(false));
                     let is_aborted_to_move = is_aborted.clone();
                     res.on_aborted(move || {
                         is_aborted_to_move.store(true, Ordering::Relaxed);
                     });
 
-                    let ws_key_string = req
-                        .get_header("sec-websocket-key")
-                        .expect("[async_uws]: There is no sec-websocket-key in req headers")
-                        .to_string();
-                    let ws_protocol = req.get_header("sec-websocket-protocol").map(String::from);
-                    let ws_extensions =
-                        req.get_header("sec-websocket-extensions").map(String::from);
-
-                    let ws_per_socket_data_storage = ws_per_socket_data_storage.clone();
-                    let global_data_storage = global_data_storage.clone();
-                    let mut custom_user_data = DataStorage::default();
-                    upgrade_hook(&mut req, &mut custom_user_data);
-
-                    tokio::spawn(async move {
-                        let (sink, stream) = unbounded_channel::<WsMessage>();
-                        let user_data_id = ws_key_string.to_owned();
-
-                        let user_data = WsPerSocketUserData {
-                            sink,
-                            id: user_data_id.to_owned(),
-                            stream: Some(stream),
-                            storage: ws_per_socket_data_storage.clone(),
-                            is_open: Arc::new(AtomicBool::new(true)),
-                            shared_data_storage: global_data_storage.clone(),
-                            custom_user_data: custom_user_data.into(),
-                        };
-
-                        let storage_to_move = ws_per_socket_data_storage.clone();
-                        {
-                            let mut storage = ws_per_socket_data_storage.lock().unwrap();
-                            storage.insert(user_data_id.to_owned(), Box::new(user_data));
-                        }
-
-                        let is_aborted = is_aborted.load(Ordering::SeqCst);
-                        if is_aborted {
-                            println!("Upgrade request is aborted");
-                            return;
-                        }
-
-                        let callback = move || {
-                            let mut storage = storage_to_move.lock().unwrap();
-                            let user_data_ref = storage.get_mut(&user_data_id).unwrap().as_mut();
-                            let ws_protocol: Option<&str> = ws_protocol.as_deref();
-                            let ws_extensions: Option<&str> = ws_extensions.as_deref();
-
-                            res.upgrade(
-                                &ws_key_string,
-                                ws_protocol,
-                                ws_extensions,
-                                ctx,
-                                Some(user_data_ref),
-                            );
-                        };
-
-                        loop_defer(uws_loop, callback)
-                    });
+                    let res = HttpResponse::<SSL>::new(
+                        res,
+                        uws_loop,
+                        is_aborted.clone(),
+                        global_data_storage.clone(),
+                        Some(ws_per_socket_data_storage.clone()),
+                        Some(ctx),
+                    );
+                    upgrade_hook(req, res);
                 },
             )),
             open: Some(Box::new(move |ws_connection| {

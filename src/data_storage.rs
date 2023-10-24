@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Default)]
 pub struct DataStorage {
-    pub storage: HashMap<TypeId, Box<dyn Any + Sync + Send + 'static>>,
+    pub(crate) storage: HashMap<TypeId, Box<dyn Any + Sync + Send + 'static>>,
 }
 
 impl DataStorage {
@@ -27,3 +27,5 @@ impl DataStorage {
 }
 
 pub type SharedDataStorage = Arc<DataStorage>;
+
+

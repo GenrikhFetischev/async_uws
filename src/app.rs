@@ -78,7 +78,7 @@ impl<const SSL: bool> AppStruct<SSL> {
     where
         T: (Fn(Websocket<SSL>) -> W) + 'static + Send + Sync + Clone,
         W: Future<Output = ()> + 'static + Send,
-        U: Fn(&mut HttpRequest, &mut DataStorage) + 'static + Send + Sync + Clone,
+        U: Fn(HttpRequest, HttpResponse<SSL>) + 'static + Send + Sync + Clone,
     {
         let ws_behavior = WebsocketBehavior::new(
             route_settings,
@@ -236,7 +236,8 @@ where
         });
 
         tokio::spawn(async move {
-            let res = HttpResponse::new(res, uws_loop, is_aborted, data_storage.clone());
+            let res =
+                HttpResponse::new(res, uws_loop, is_aborted, data_storage.clone(), None, None);
             #[allow(clippy::redundant_locals)]
             let handler_wrapper = handler_wrapper;
             let handler = unsafe { handler_wrapper.ptr.as_ref().unwrap() };

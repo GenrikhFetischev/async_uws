@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use tokio::sync::{broadcast, oneshot};
 use tokio::sync::broadcast::Sender;
+use tokio::sync::{broadcast, oneshot};
 use tokio::time::sleep;
 
 use async_uws::app::App;

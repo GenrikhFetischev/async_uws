@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use tokio::sync::mpsc::unbounded_channel;
 use uwebsockets_rs::http_request::HttpRequest;
@@ -21,6 +22,7 @@ pub struct HttpResponse<const SSL: bool> {
 }
 
 unsafe impl<const SSL: bool> Sync for HttpResponse<SSL> {}
+
 unsafe impl<const SSL: bool> Send for HttpResponse<SSL> {}
 
 impl<const SSL: bool> HttpResponse<SSL> {
@@ -101,12 +103,11 @@ impl<const SSL: bool> HttpResponse<SSL> {
         user_data: Option<SharedDataStorage>,
     ) {
         let (sink, stream) = unbounded_channel::<WsMessage>();
-        let user_data_id = ws_key_string.to_owned();
 
         let ws_per_socket_data_storage = self.per_socket_data_storage.clone().unwrap();
         let user_data = WsPerSocketUserData {
             sink,
-            id: user_data_id.to_owned(),
+            id: None,
             stream: Some(stream),
             storage: ws_per_socket_data_storage.clone(),
             is_open: Arc::new(AtomicBool::new(true)),
@@ -114,26 +115,31 @@ impl<const SSL: bool> HttpResponse<SSL> {
             custom_user_data: user_data.unwrap_or_default(),
         };
 
+        let mut user_data = Box::new(user_data);
+        let user_data_id = user_data.as_mut() as *mut WsPerSocketUserData as usize;
+        user_data.id = Some(user_data_id);
+
         {
             let mut storage = ws_per_socket_data_storage.lock().unwrap();
-            storage.insert(user_data_id.to_owned(), Box::new(user_data));
+            storage.insert(user_data_id, user_data);
         }
 
-        let is_aborted = self.is_aborted.load(Ordering::SeqCst);
-        if is_aborted {
-            println!("[async_uws] Upgrade request is aborted");
-            return;
-        }
-
-        let storage_to_move = ws_per_socket_data_storage.clone();
-
+        let is_aborted = self.is_aborted.clone();
         let callback = move || {
-            let mut storage = storage_to_move.lock().unwrap();
-            let user_data_ref = storage.get_mut(&user_data_id).unwrap().as_mut();
+            let user_data_ptr = user_data_id as *mut WsPerSocketUserData;
+            let mut non_null =
+                NonNull::new(user_data_ptr).expect("[async_uws] WsPerSocketUserData is null :(");
+            let user_data_ref: &mut WsPerSocketUserData = unsafe { non_null.as_mut() };
 
             let ws_protocol: Option<&str> = ws_protocol.as_deref();
             let ws_extensions: Option<&str> = ws_extensions.as_deref();
 
+            if is_aborted.load(Ordering::SeqCst) {
+                println!("[async_uws] Upgrade request is aborted");
+                let mut storage = ws_per_socket_data_storage.lock().unwrap();
+                storage.remove(&user_data_id);
+                return;
+            }
             self.native.unwrap().upgrade(
                 &ws_key_string,
                 ws_protocol,
@@ -152,8 +158,7 @@ impl<const SSL: bool> HttpResponse<SSL> {
             .expect("[async_uws]: There is no sec-websocket-key in req headers")
             .to_string();
         let ws_protocol = req.get_header("sec-websocket-protocol").map(String::from);
-        let ws_extensions =
-            req.get_header("sec-websocket-extensions").map(String::from);
+        let ws_extensions = req.get_header("sec-websocket-extensions").map(String::from);
 
         res.upgrade(ws_key_string, ws_protocol, ws_extensions, None);
     }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::http_request::HttpRequest;
@@ -18,11 +18,11 @@ use crate::websocket::Websocket;
 use crate::ws_message::WsMessage;
 
 pub type SharedWsPerSocketUserData = Box<WsPerSocketUserData>;
-pub type WsPerSocketUserDataStorage = Arc<Mutex<HashMap<String, SharedWsPerSocketUserData>>>;
+pub type WsPerSocketUserDataStorage = Arc<Mutex<HashMap<usize, SharedWsPerSocketUserData>>>;
 
 #[derive(Debug)]
 pub struct WsPerSocketUserData {
-    pub(crate) id: String,
+    pub(crate) id: Option<usize>,
     pub(crate) storage: WsPerSocketUserDataStorage,
     pub(crate) sink: UnboundedSender<WsMessage>,
     pub(crate) stream: Option<UnboundedReceiver<WsMessage>>,
@@ -165,7 +165,7 @@ fn close<const SSL: bool>(native_ws: WebSocketStruct<SSL>, code: i32, reason: Op
     user_data.is_open.store(false, Ordering::SeqCst);
 
     let mut storage = user_data.storage.lock().unwrap();
-    storage.remove(&user_data.id);
+    storage.remove(&user_data.id.unwrap());
 }
 
 fn ping<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>) {

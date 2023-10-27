@@ -1,6 +1,6 @@
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use tokio::sync::oneshot::Receiver;
 use uwebsockets_rs::app::Application as NativeApp;

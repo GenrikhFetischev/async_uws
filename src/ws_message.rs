@@ -8,6 +8,41 @@ pub enum WsMessage {
     Close(i32, Option<String>),
 }
 
+impl WsMessage {
+    pub fn is_msg(&self) -> bool {
+        match self {
+            WsMessage::Message(_, _) => true,
+            WsMessage::Ping(_) => false,
+            WsMessage::Pong(_) => false,
+            WsMessage::Close(_, _) => false,
+        }
+    }
+    pub fn is_ping(&self) -> bool {
+        match self {
+            WsMessage::Message(_, _) => false,
+            WsMessage::Ping(_) => true,
+            WsMessage::Pong(_) => false,
+            WsMessage::Close(_, _) => false,
+        }
+    }
+    pub fn is_pong(&self) -> bool {
+        match self {
+            WsMessage::Message(_, _) => false,
+            WsMessage::Ping(_) => false,
+            WsMessage::Pong(_) => true,
+            WsMessage::Close(_, _) => false,
+        }
+    }
+    pub fn is_close(&self) -> bool {
+        match self {
+            WsMessage::Message(_, _) => false,
+            WsMessage::Ping(_) => false,
+            WsMessage::Pong(_) => false,
+            WsMessage::Close(_, _) => true,
+        }
+    }
+}
+
 impl From<String> for WsMessage {
     fn from(value: String) -> Self {
         WsMessage::Message(Vec::from(value.as_bytes()), Opcode::Text)

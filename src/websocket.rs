@@ -1,12 +1,12 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
-use uwebsockets_rs::websocket::{Opcode, SendStatus, WebSocketStruct};
+use uwebsockets_rs::websocket::{Opcode, SendStatus as NativeSendStatus, WebSocketStruct};
 
 use crate::data_storage::SharedDataStorage;
 use crate::ws_message::WsMessage;
@@ -175,6 +175,24 @@ impl Future for WebsocketSendFuture {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum SendStatus {
+    Backpressure,
+    Success,
+    Dropped,
+    WsDisconnected,
+}
+
+impl From<NativeSendStatus> for SendStatus {
+    fn from(value: NativeSendStatus) -> Self {
+        match value {
+            NativeSendStatus::Backpressure => SendStatus::Backpressure,
+            NativeSendStatus::Success => SendStatus::Success,
+            NativeSendStatus::Dropped => SendStatus::Dropped,
+        }
+    }
+}
+
 async fn send_to_socket<const SSL: bool>(
     message: WsMessage,
     compress: bool,
@@ -183,29 +201,45 @@ async fn send_to_socket<const SSL: bool>(
     uws_loop: UwsLoop,
     is_open: Arc<AtomicBool>,
 ) -> Result<SendStatus, String> {
-    let is_open = is_open.load(Ordering::SeqCst);
-    if !is_open {
-        return Err("WebSocket is closed!".to_string());
-    }
     let send_status = match message {
         WsMessage::Message(msg, opcode) => {
-            let callback = move || websocket.send_with_options(&msg, opcode, compress, fin);
+            let callback = move || {
+                if !is_open.load(Ordering::Relaxed) {
+                    return SendStatus::WsDisconnected;
+                }
+                websocket
+                    .send_with_options(&msg, opcode, compress, fin)
+                    .into()
+            };
             WebsocketSendFuture::new(Box::new(callback), uws_loop).await
         }
         WsMessage::Ping(msg) => {
             let callback = move || {
-                websocket.send_with_options(&msg.unwrap_or_default(), Opcode::Ping, false, true)
+                if !is_open.load(Ordering::Relaxed) {
+                    return SendStatus::WsDisconnected;
+                }
+                websocket
+                    .send_with_options(&msg.unwrap_or_default(), Opcode::Ping, false, true)
+                    .into()
             };
             WebsocketSendFuture::new(Box::new(callback), uws_loop).await
         }
         WsMessage::Pong(msg) => {
             let callback = move || {
-                websocket.send_with_options(&msg.unwrap_or_default(), Opcode::Pong, false, true)
+                if !is_open.load(Ordering::Relaxed) {
+                    return SendStatus::WsDisconnected;
+                }
+                websocket
+                    .send_with_options(&msg.unwrap_or_default(), Opcode::Pong, false, true)
+                    .into()
             };
             WebsocketSendFuture::new(Box::new(callback), uws_loop).await
         }
         WsMessage::Close(code, reason) => {
             let callback = move || {
+                if !is_open.load(Ordering::Relaxed) {
+                    return SendStatus::WsDisconnected;
+                }
                 websocket.end(code, reason.as_deref());
                 SendStatus::Success
             };

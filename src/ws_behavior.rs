@@ -162,7 +162,7 @@ fn close<const SSL: bool>(native_ws: WebSocketStruct<SSL>, code: i32, reason: Op
         .sink
         .send(WsMessage::Close(code, reason.map(String::from)))
         .unwrap_or_default();
-    user_data.is_open.store(false, Ordering::SeqCst);
+    user_data.is_open.store(false, Ordering::Relaxed);
 
     let mut storage = user_data.storage.lock().unwrap();
     storage.remove(&user_data.id.unwrap());

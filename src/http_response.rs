@@ -1,6 +1,6 @@
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc::unbounded_channel;
 use uwebsockets_rs::http_request::HttpRequest;
@@ -50,13 +50,13 @@ impl<const SSL: bool> HttpResponse<SSL> {
         self.data_storage.as_ref().get_data::<T>()
     }
 
-    pub fn end(mut self, data: Option<&'static str>, close_connection: bool) {
+    pub fn end(mut self, data: Option<String>, close_connection: bool) {
         tokio::spawn(async move {
             let uws_loop = self.uws_loop;
 
             let callback = move || {
                 let res = self.native.take().unwrap();
-                res.end(data, close_connection);
+                res.end(data.as_deref(), close_connection);
             };
 
             loop_defer(uws_loop, callback);

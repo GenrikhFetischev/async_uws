@@ -1,6 +1,6 @@
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::oneshot::Receiver;
 use uwebsockets_rs::app::Application as NativeApp;
@@ -11,6 +11,7 @@ use uwebsockets_rs::listen_socket::ListenSocket;
 use uwebsockets_rs::us_socket_context_options::UsSocketContextOptions;
 use uwebsockets_rs::uws_loop::{get_loop, UwsLoop};
 
+use crate::body_reader::BodyReader;
 use crate::data_storage::{DataStorage, SharedDataStorage};
 use crate::http_response::HttpResponse;
 use crate::send_ptr::SendPtr;
@@ -235,9 +236,18 @@ where
             is_aborted_to_move.store(true, Ordering::Relaxed);
         });
 
+        let body_reader = BodyReader::new(res.clone());
+
         tokio::spawn(async move {
-            let res =
-                HttpResponse::new(res, uws_loop, is_aborted, data_storage.clone(), None, None);
+            let res = HttpResponse::new(
+                res,
+                uws_loop,
+                is_aborted,
+                data_storage.clone(),
+                Some(body_reader),
+                None,
+                None,
+            );
             #[allow(clippy::redundant_locals)]
             let handler_wrapper = handler_wrapper;
             let handler = unsafe { handler_wrapper.ptr.as_ref().unwrap() };

@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{broadcast, oneshot};
-use tokio::time::sleep;
 
 use async_uws::app::App;
 use async_uws::data_storage::DataStorage;
@@ -40,7 +39,6 @@ async fn main() {
     let (b_sink, mut b_stream) = broadcast::channel::<()>(1);
     tokio::spawn(async move {
         let _ = b_stream.recv().await;
-        println!("!!!!");
         sink.send(()).unwrap();
     });
 
@@ -60,65 +58,52 @@ async fn main() {
     app.data(shared_data);
     app.data(b_sink);
 
-    app.get("/get", get_handler)
-        .post("/x", move |res, _req| async {
-            res.end(Some("response post"), true);
-        })
-        .get(
-            "/closure",
-            move |res: HttpResponse<false>, _req: HttpRequest| async {
-                println!("Closure Handler started");
-                sleep(Duration::from_secs(1)).await;
-                println!("Closure Ready to respond");
-                res.end(Some("Closure it's the response"), true);
-            },
-        )
-        .ws(
-            "/ws",
-            route_settings.clone(),
-            |mut ws| async move {
-                let b_sink = ws.data::<Sender<()>>().unwrap().clone();
-                let status = ws.send("hello".into()).await;
-                println!("Send status: {status:#?}");
+    app.ws(
+        "/ws",
+        route_settings.clone(),
+        |mut ws| async move {
+            let b_sink = ws.data::<Sender<()>>().unwrap().clone();
+            let status = ws.send("hello".into()).await;
+            println!("Send status: {status:#?}");
 
-                while let Some(msg) = ws.stream.recv().await {
-                    println!("{msg:#?}");
-                    if let WsMessage::Message(data, _) = msg {
-                        println!("{data:#?}");
-                        b_sink.send(()).unwrap();
-                    };
-                    let status = ws
-                        .send(WsMessage::Message(
-                            "asdfasdf".as_bytes().to_vec(),
-                            Opcode::Text,
-                        ))
-                        .await;
-                    println!("{status:#?}");
-                }
-            },
-            |req, res| {
-                custom_upgrade(req, res);
-            },
-        )
-        .ws(
-            "/ws-test",
-            route_settings.clone(),
-            handler_ws,
-            custom_upgrade,
-        )
-        .ws(
-            "/split",
-            route_settings,
-            ws_split,
-            HttpResponse::default_upgrade,
-        )
-        .listen(
-            3001,
-            Some(|listen_socket| {
-                println!("{listen_socket:#?}");
-            }),
-        )
-        .run();
+            while let Some(msg) = ws.stream.recv().await {
+                println!("{msg:#?}");
+                if let WsMessage::Message(data, _) = msg {
+                    println!("{data:#?}");
+                    b_sink.send(()).unwrap();
+                };
+                let status = ws
+                    .send(WsMessage::Message(
+                        "asdfasdf".as_bytes().to_vec(),
+                        Opcode::Text,
+                    ))
+                    .await;
+                println!("{status:#?}");
+            }
+        },
+        |req, res| {
+            custom_upgrade(req, res);
+        },
+    )
+    .ws(
+        "/ws-test",
+        route_settings.clone(),
+        handler_ws,
+        custom_upgrade,
+    )
+    .ws(
+        "/split",
+        route_settings,
+        ws_split,
+        HttpResponse::default_upgrade,
+    )
+    .listen(
+        3001,
+        Some(|listen_socket| {
+            println!("{listen_socket:#?}");
+        }),
+    )
+    .run();
     println!("Server exiting");
 }
 
@@ -156,17 +141,6 @@ struct UpgradeReqInfo {
     full_url: String,
     headers: Vec<(String, String)>,
 }
-
-async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
-    let data = res.data::<SharedData>().unwrap();
-    println!("!!! Shared data: {}", data.data);
-    let path = req.get_full_url();
-    println!("Handler started {path}");
-    sleep(Duration::from_secs(1)).await;
-    println!("Ready to respond");
-    res.end(Some("it's the response"), true);
-}
-
 async fn handler_ws(mut ws: Websocket<false>) {
     let data = ws.data::<SharedData>().unwrap();
     println!("!!! Global Shared data: {}", data.data);

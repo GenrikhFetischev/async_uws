@@ -2,12 +2,13 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::{Receiver, unbounded_channel};
 use uwebsockets_rs::http_request::HttpRequest;
 use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket_behavior::UpgradeContext;
 
+use crate::body_reader::{BodyChunk, BodyReader};
 use crate::data_storage::SharedDataStorage;
 use crate::ws_behavior::{WsPerSocketUserData, WsPerSocketUserDataStorage};
 use crate::ws_message::WsMessage;
@@ -15,6 +16,7 @@ use crate::ws_message::WsMessage;
 pub struct HttpResponse<const SSL: bool> {
     pub(crate) native: Option<HttpResponseStruct<SSL>>,
     pub(crate) uws_loop: UwsLoop,
+    pub(crate) body_reader: Option<BodyReader<SSL>>,
     pub is_aborted: Arc<AtomicBool>,
     data_storage: SharedDataStorage,
     per_socket_data_storage: Option<WsPerSocketUserDataStorage>,
@@ -31,6 +33,7 @@ impl<const SSL: bool> HttpResponse<SSL> {
         uws_loop: UwsLoop,
         is_aborted: Arc<AtomicBool>,
         data_storage: SharedDataStorage,
+        body_reader: Option<BodyReader<SSL>>,
         // Will be not None only for upgrade requests
         per_socket_data_storage: Option<WsPerSocketUserDataStorage>,
         // Will be not None only for upgrade requests
@@ -43,6 +46,21 @@ impl<const SSL: bool> HttpResponse<SSL> {
             data_storage,
             per_socket_data_storage,
             upgrade_context,
+            body_reader,
+        }
+    }
+
+    pub async fn get_body(&mut self) -> Result<Vec<u8>, String> {
+        match self.body_reader.take() {
+            None => Err("Body could be read only once".to_string()),
+            Some(body) => Ok(body.collect().await),
+        }
+    }
+
+    pub fn get_body_stream(&mut self) -> Result<Receiver<BodyChunk>, String> {
+        match self.body_reader.take() {
+            None => Err("Body could be read only once".to_string()),
+            Some(body) => Ok(body.take_stream()),
         }
     }
 
@@ -50,13 +68,14 @@ impl<const SSL: bool> HttpResponse<SSL> {
         self.data_storage.as_ref().get_data::<T>()
     }
 
-    pub fn end(mut self, data: Option<String>, close_connection: bool) {
+    pub fn end(mut self, data: Option<Vec<u8>>, close_connection: bool) {
         tokio::spawn(async move {
             let uws_loop = self.uws_loop;
 
             let callback = move || {
+                let response = data.as_deref();
                 let res = self.native.take().unwrap();
-                res.end(data.as_deref(), close_connection);
+                res.end(response, close_connection);
             };
 
             loop_defer(uws_loop, callback);

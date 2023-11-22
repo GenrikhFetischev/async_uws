@@ -6,6 +6,7 @@ mod send_ptr;
 pub mod websocket;
 pub mod ws_behavior;
 pub mod ws_message;
+mod body_reader;
 
 pub mod uwebsockets_rs {
     pub use uwebsockets_rs::listen_socket::ListenSocket;

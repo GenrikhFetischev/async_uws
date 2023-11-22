@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::http_request::HttpRequest;
@@ -100,6 +100,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                         uws_loop,
                         is_aborted.clone(),
                         global_data_storage.clone(),
+                        None,
                         Some(ws_per_socket_data_storage.clone()),
                         Some(ctx),
                     );

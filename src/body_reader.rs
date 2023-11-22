@@ -35,7 +35,7 @@ impl<const SSL: bool> BodyReader<SSL> {
         self.body_stream
     }
 
-    pub async fn collect(self) -> Vec<u8> {
+    pub async fn collect(self) -> Option<Vec<u8>> {
         let mut data_collector = Vec::<u8>::new();
         let mut stream = self.take_stream();
         while let Some((chunk, is_fin)) = stream.recv().await {
@@ -46,6 +46,10 @@ impl<const SSL: bool> BodyReader<SSL> {
             }
         }
 
-        data_collector
+        if data_collector.is_empty() {
+            None
+        } else {
+            Some(data_collector)
+        }
     }
 }

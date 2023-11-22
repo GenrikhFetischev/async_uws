@@ -50,10 +50,11 @@ impl<const SSL: bool> HttpResponse<SSL> {
         }
     }
 
-    pub async fn get_body(&mut self) -> Result<Vec<u8>, String> {
-        match self.body_reader.take() {
-            None => Err("Body could be read only once".to_string()),
-            Some(body) => Ok(body.collect().await),
+    pub async fn get_body(&mut self) -> Option<Vec<u8>> {
+        if let Some(body) = self.body_reader.take() {
+            body.collect().await
+        } else {
+            None
         }
     }
 

@@ -65,7 +65,7 @@ async fn main() {
 }
 
 async fn post_handler(mut res: HttpResponse<false>, _: HttpRequest) {
-    let body = res.get_body().await.unwrap();
+    let body = res.get_body().await.unwrap_or("There is no body".into());
     let body_str = String::from_utf8(body).unwrap();
     println!("{body_str}");
 
@@ -84,7 +84,7 @@ async fn body_stream(mut res: HttpResponse<false>, _: HttpRequest) {
                     .expect("[uwebsockets_rs] Can't read string from ptr")
             }
         };
-        println!("{chunk_str}");
+
     }
 
     res.end(Some("Thanks".into()), true);

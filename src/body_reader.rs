@@ -20,9 +20,12 @@ impl<const SSL: bool> BodyReader<SSL> {
             let chunk = chunk.to_vec();
             let sink = sink.clone();
             tokio::spawn(async move {
-                sink.send_timeout((chunk, end), Duration::from_millis(50))
-                    .await
-                    .unwrap();
+                let res = sink.send_timeout((chunk, end), Duration::from_millis(50))
+                    .await;
+                if let Err(e) = res {
+                    eprintln!("[async_uws] Error sending body chunk to stream: {e:#?}");
+                }
+
             });
         });
 

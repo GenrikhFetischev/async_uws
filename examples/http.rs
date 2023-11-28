@@ -69,14 +69,14 @@ async fn post_handler(mut res: HttpResponse<false>, _: HttpRequest) {
     let body_str = String::from_utf8(body).unwrap();
     println!("{body_str}");
 
-    res.end(Some("THanks".into()), true);
+    res.end(Some("Thanks".into()), true);
 }
 
 async fn body_stream(mut res: HttpResponse<false>, _: HttpRequest) {
     let mut body_stream = res.get_body_stream().unwrap();
 
     while let Some((chunk, _)) = body_stream.recv().await {
-        let chunk_str = match std::str::from_utf8(&chunk) {
+        let chunk = match std::str::from_utf8(&chunk) {
             Ok(s) => s,
             Err(e) => {
                 let valid_len = e.valid_up_to();
@@ -84,6 +84,8 @@ async fn body_stream(mut res: HttpResponse<false>, _: HttpRequest) {
                     .expect("[uwebsockets_rs] Can't read string from ptr")
             }
         };
+
+        println!("{chunk}");
 
     }
 
@@ -93,7 +95,7 @@ async fn body_stream(mut res: HttpResponse<false>, _: HttpRequest) {
 async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
     let data = res.data::<SharedData>().unwrap();
     println!("!!! Shared data: {}", data.data);
-    let path = req.get_full_url();
+    let path = req.full_url;
     println!("Handler started {path}");
     sleep(Duration::from_secs(1)).await;
     println!("Ready to respond");

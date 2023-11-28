@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use tokio::sync::broadcast::Sender;
 use tokio::sync::{broadcast, oneshot};
+use tokio::sync::broadcast::Sender;
 
 use async_uws::app::App;
 use async_uws::data_storage::DataStorage;
@@ -59,7 +59,7 @@ async fn main() {
     app.data(b_sink);
 
     app.ws(
-        "/ws",
+        "/shutdown",
         route_settings.clone(),
         |mut ws| async move {
             let b_sink = ws.data::<Sender<()>>().unwrap().clone();
@@ -107,21 +107,26 @@ async fn main() {
     println!("Server exiting");
 }
 
-fn custom_upgrade(mut req: HttpRequest, res: HttpResponse<false>) {
-    let ws_key_string = req
-        .get_header("sec-websocket-key")
-        .expect("[async_uws]: There is no sec-websocket-key in req headers")
-        .to_string();
-    let ws_protocol = req.get_header("sec-websocket-protocol").map(String::from);
-    let ws_extensions = req.get_header("sec-websocket-extensions").map(String::from);
+fn custom_upgrade(req: HttpRequest, res: HttpResponse<false>) {
+    let ws_key = req
+        .headers
+        .iter()
+        .find(|(key, _)| key == "sec-websocket-key")
+        .map(|(_, value)| value.to_string())
+        .expect("[async_uws]: There is no sec-websocket-key in req headers");
+    let ws_protocol = req
+        .headers
+        .iter()
+        .find(|(key, _)| key == "sec-websocket-protocol")
+        .map(|(_, value)| value.to_string());
+    let ws_extensions = req
+        .headers
+        .iter()
+        .find(|(key, _)| key == "sec-websocket-extensions")
+        .map(|(_, value)| value.to_string());
 
-    let full_url = req.get_full_url().to_string();
-    let headers: Vec<(String, String)> = req
-        .get_headers()
-        .clone()
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+    let full_url = req.full_url;
+    let headers = req.headers;
 
     let upgrade_req_info = UpgradeReqInfo { full_url, headers };
     let mut connection_data_storage = DataStorage::new();
@@ -129,7 +134,7 @@ fn custom_upgrade(mut req: HttpRequest, res: HttpResponse<false>) {
     connection_data_storage.add_data(upgrade_req_info);
 
     res.upgrade(
-        ws_key_string,
+        ws_key,
         ws_protocol,
         ws_extensions,
         Some(connection_data_storage.into()),

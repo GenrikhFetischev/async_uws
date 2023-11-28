@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::oneshot::Receiver;
 use uwebsockets_rs::app::Application as NativeApp;
 use uwebsockets_rs::app_close::app_close;
-use uwebsockets_rs::http_request::HttpRequest;
+use uwebsockets_rs::http_request::HttpRequest as SyncHttpRequest;
 use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::listen_socket::ListenSocket;
 use uwebsockets_rs::us_socket_context_options::UsSocketContextOptions;
@@ -13,6 +13,7 @@ use uwebsockets_rs::uws_loop::{get_loop, UwsLoop};
 
 use crate::body_reader::BodyReader;
 use crate::data_storage::{DataStorage, SharedDataStorage};
+use crate::http_request::HttpRequest;
 use crate::http_response::HttpResponse;
 use crate::send_ptr::SendPtr;
 use crate::websocket::Websocket;
@@ -218,7 +219,7 @@ pub fn wrap_http_handler<T, R, const SSL: bool>(
     handler: T,
     uws_loop: UwsLoop,
     data_storage: SharedDataStorage,
-) -> Box<dyn Fn(HttpResponseStruct<SSL>, HttpRequest)>
+) -> Box<dyn Fn(HttpResponseStruct<SSL>, SyncHttpRequest)>
 where
     T: (Fn(HttpResponse<SSL>, HttpRequest) -> R) + 'static + Send + Sync,
     R: Future<Output = ()> + 'static + Send,
@@ -228,7 +229,7 @@ where
         ptr: Box::into_raw(handler),
     };
 
-    let handler = move |mut res: HttpResponseStruct<SSL>, req: HttpRequest| {
+    let handler = move |mut res: HttpResponseStruct<SSL>, mut req: SyncHttpRequest| {
         let data_storage = data_storage.clone();
         let is_aborted = Arc::new(AtomicBool::new(false));
         let is_aborted_to_move = is_aborted.clone();
@@ -236,6 +237,7 @@ where
             is_aborted_to_move.store(true, Ordering::Relaxed);
         });
 
+        let async_http_request = HttpRequest::from(&mut req);
         let body_reader = BodyReader::new(res.clone());
 
         tokio::spawn(async move {
@@ -251,7 +253,7 @@ where
             #[allow(clippy::redundant_locals)]
             let handler_wrapper = handler_wrapper;
             let handler = unsafe { handler_wrapper.ptr.as_ref().unwrap() };
-            handler(res, req).await;
+            handler(res, async_http_request).await;
         });
     };
     Box::new(handler)

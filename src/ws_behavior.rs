@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use uwebsockets_rs::http_request::HttpRequest;
+use uwebsockets_rs::http_request::HttpRequest as SyncHttpRequest;
 use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::uws_loop::UwsLoop;
 use uwebsockets_rs::websocket::{Opcode, WebSocketStruct};
@@ -13,6 +13,7 @@ use uwebsockets_rs::websocket_behavior::{
 };
 
 use crate::data_storage::SharedDataStorage;
+use crate::http_request::HttpRequest;
 use crate::http_response::HttpResponse;
 use crate::websocket::Websocket;
 use crate::ws_message::WsMessage;
@@ -88,13 +89,14 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
             send_pings_automatically: settings.send_pings_automatically.unwrap_or_default(),
             max_lifetime: settings.max_lifetime.unwrap_or_default(),
             upgrade: Some(Box::new(
-                move |mut res: HttpResponseStruct<SSL>, req: HttpRequest, ctx: UpgradeContext| {
+                move |mut res: HttpResponseStruct<SSL>, mut req: SyncHttpRequest, ctx: UpgradeContext| {
                     let is_aborted = Arc::new(AtomicBool::new(false));
                     let is_aborted_to_move = is_aborted.clone();
                     res.on_aborted(move || {
                         is_aborted_to_move.store(true, Ordering::Relaxed);
                     });
 
+                    let req = HttpRequest::from(&mut req);
                     let res = HttpResponse::<SSL>::new(
                         res,
                         uws_loop,

@@ -3,13 +3,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc::{Receiver, unbounded_channel};
-use uwebsockets_rs::http_request::HttpRequest;
 use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket_behavior::UpgradeContext;
 
 use crate::body_reader::{BodyChunk, BodyReader};
 use crate::data_storage::SharedDataStorage;
+use crate::http_request::HttpRequest;
 use crate::ws_behavior::{WsPerSocketUserData, WsPerSocketUserDataStorage};
 use crate::ws_message::WsMessage;
 
@@ -173,13 +173,18 @@ impl<const SSL: bool> HttpResponse<SSL> {
     }
 
     pub fn default_upgrade(req: HttpRequest, res: HttpResponse<SSL>) {
-        let ws_key_string = req
-            .get_header("sec-websocket-key")
-            .expect("[async_uws]: There is no sec-websocket-key in req headers")
-            .to_string();
-        let ws_protocol = req.get_header("sec-websocket-protocol").map(String::from);
-        let ws_extensions = req.get_header("sec-websocket-extensions").map(String::from);
+        let ws_key = req.headers.iter()
+          .find(|(key, _)| key == "sec-websocket-key")
+          .map(|(_, value)| value.to_string())
+          .expect("[async_uws]: There is no sec-websocket-key in req headers");
+        let ws_protocol = req.headers.iter()
+          .find(|(key, _)| key == "sec-websocket-protocol")
+          .map(|(_, value)| value.to_string());
+        let ws_extensions= req.headers.iter()
+          .find(|(key, _)| key == "sec-websocket-extensions")
+          .map(|(_, value)| value.to_string());
 
-        res.upgrade(ws_key_string, ws_protocol, ws_extensions, None);
+
+        res.upgrade(ws_key, ws_protocol, ws_extensions, None);
     }
 }

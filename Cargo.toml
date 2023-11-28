@@ -1,6 +1,6 @@
 [package]
 name = "async_uws"
-version = "0.0.22"
+version = "0.0.23"
 edition = "2021"
 authors = ["Genrikh Fetishchev <genrikhfetischev@gmail.com>"]
 description = "Rust async HTTP & WebSocket server based on uWebSockets"
@@ -13,8 +13,8 @@ exclude = ["build.rs"]
 [profile.dev]
 debug = true
 
+
 [dependencies]
 uwebsockets_rs = { version = "0.0.11", path = "../uwebsockets_rs", features = ["native-access"] }
 tokio = { version = "1.28.1", features = ["full"] }
-
 

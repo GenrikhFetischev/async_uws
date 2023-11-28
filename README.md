@@ -45,7 +45,7 @@ On Linux, ensure that `libuv`, `libssl`, and `libcrypto` are installed via your 
 
 ### Windows Users
 
-For Windows users, the setup process might involve additional steps such as using `vcpkg` or another package manager to install `libuv` and setting up the environment for `MSVC` or `MinGW`.
+Unfortunately this library doesn't currently support Windows, but please don't hesitate sending a PR for Windows support at [libuwebsockets-sys crate build script](https://github.com/GenrikhFetischev/libuwebsockets-sys/blob/main/build.rs#L13)
 
 
 ## Troubleshooting

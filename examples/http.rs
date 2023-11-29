@@ -51,7 +51,8 @@ async fn main() {
                 res.end(
                     Some("Closure it's the response".to_string().into_bytes()),
                     true,
-                );
+                )
+                .await;
             },
         )
         .listen(
@@ -69,7 +70,7 @@ async fn post_handler(mut res: HttpResponse<false>, _: HttpRequest) {
     let body_str = String::from_utf8(body).unwrap();
     println!("{body_str}");
 
-    res.end(Some("Thanks".into()), true);
+    res.end(Some("Thanks".into()), true).await;
 }
 
 async fn body_stream(mut res: HttpResponse<false>, _: HttpRequest) {
@@ -86,18 +87,16 @@ async fn body_stream(mut res: HttpResponse<false>, _: HttpRequest) {
         };
 
         println!("{chunk}");
-
     }
 
-    res.end(Some("Thanks".into()), true);
+    res.end(Some("Thanks".into()), true).await;
 }
 
-async fn get_handler(res: HttpResponse<false>, req: HttpRequest) {
+async fn get_handler(mut res: HttpResponse<false>, req: HttpRequest) {
     let data = res.data::<SharedData>().unwrap();
-    println!("!!! Shared data: {}", data.data);
+    println!("Shared data: {}", data.data);
     let path = req.full_url;
-    println!("Handler started {path}");
-    sleep(Duration::from_secs(1)).await;
-    println!("Ready to respond");
-    res.end(Some("it's the response".into()), true);
+    res.write_header("response-for-origin".to_owned(), path);
+    res.write_status("201".to_string());
+    res.end(Some("it's the response".into()), true).await;
 }

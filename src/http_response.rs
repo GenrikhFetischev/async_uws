@@ -10,6 +10,7 @@ use uwebsockets_rs::websocket_behavior::UpgradeContext;
 use crate::body_reader::{BodyChunk, BodyReader};
 use crate::data_storage::SharedDataStorage;
 use crate::http_request::HttpRequest;
+use crate::loop_defer_future::LoopDeferFuture;
 use crate::ws_behavior::{WsPerSocketUserData, WsPerSocketUserDataStorage};
 use crate::ws_message::WsMessage;
 
@@ -21,6 +22,8 @@ pub struct HttpResponse<const SSL: bool> {
     data_storage: SharedDataStorage,
     per_socket_data_storage: Option<WsPerSocketUserDataStorage>,
     upgrade_context: Option<UpgradeContext>,
+    headers: Option<Vec<(String, String)>>,
+    response_status: Option<String>,
 }
 
 unsafe impl<const SSL: bool> Sync for HttpResponse<SSL> {}
@@ -47,6 +50,8 @@ impl<const SSL: bool> HttpResponse<SSL> {
             per_socket_data_storage,
             upgrade_context,
             body_reader,
+            headers: None,
+            response_status: None,
         }
     }
 
@@ -69,41 +74,38 @@ impl<const SSL: bool> HttpResponse<SSL> {
         self.data_storage.as_ref().get_data::<T>()
     }
 
-    pub fn end(mut self, data: Option<Vec<u8>>, close_connection: bool) {
-        tokio::spawn(async move {
-            let uws_loop = self.uws_loop;
+    pub async fn end(self, data: Option<Vec<u8>>, close_connection: bool) {
+        let callback = move || {
+            let connection = self.native.unwrap();
+            if let Some(status) = self.response_status.as_ref() {
+                connection.write_status(status);
+            }
 
-            let callback = move || {
+            if let Some(headers) = self.headers {
+                for (key    , value) in headers.iter() {
+                    connection.write_header(key, value);
+                }
+            }
+
+            if data.is_some() {
                 let response = data.as_deref();
-                let res = self.native.take().unwrap();
-                res.end(response, close_connection);
-            };
-
-            loop_defer(uws_loop, callback);
-        });
+                connection.end(response, close_connection);
+            } else {
+                connection.end_without_body(close_connection);
+            }
+        };
+        LoopDeferFuture::new(callback, self.uws_loop).await;
     }
 
-    pub fn write_status(&self, status: &str) {
-        if let Some(response) = self.native.as_ref() {
-            response.write_status(status);
-        }
+    pub fn write_status(&mut self, status: String) {
+        self.response_status = Some(status);
     }
 
-    pub fn write_header(&self, key: &str, value: &str) {
-        if let Some(response) = self.native.as_ref() {
-            response.write_header(key, value);
-        }
-    }
-
-    pub fn write_header_int(&self, key: &str, value: u64) {
-        if let Some(response) = self.native.as_ref() {
-            response.write_header_int(key, value);
-        }
-    }
-
-    pub fn end_without_body(&self, close_connection: bool) {
-        if let Some(response) = self.native.as_ref() {
-            response.end_without_body(close_connection);
+    pub fn write_header(&mut self, key: String, value: String) {
+        if let Some(headers) = self.headers.as_mut() {
+            headers.push((key, value))
+        } else {
+            self.headers = Some(vec![(key, value)])
         }
     }
 
@@ -173,17 +175,12 @@ impl<const SSL: bool> HttpResponse<SSL> {
     }
 
     pub fn default_upgrade(req: HttpRequest, res: HttpResponse<SSL>) {
-        let ws_key = req.headers.iter()
-          .find(|(key, _)| key == "sec-websocket-key")
-          .map(|(_, value)| value.to_string())
-          .expect("[async_uws]: There is no sec-websocket-key in req headers");
-        let ws_protocol = req.headers.iter()
-          .find(|(key, _)| key == "sec-websocket-protocol")
-          .map(|(_, value)| value.to_string());
-        let ws_extensions= req.headers.iter()
-          .find(|(key, _)| key == "sec-websocket-extensions")
-          .map(|(_, value)| value.to_string());
-
+        let ws_key = req
+            .get_header("sec-websocket-key")
+            .map(String::from)
+            .expect("[async_uws]: There is no sec-websocket-key in req headers");
+        let ws_protocol = req.get_header("sec-websocket-protocol").map(String::from);
+        let ws_extensions = req.get_header("sec-websocket-extensions").map(String::from);
 
         res.upgrade(ws_key, ws_protocol, ws_extensions, None);
     }

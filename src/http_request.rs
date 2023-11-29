@@ -10,6 +10,15 @@ pub struct HttpRequest {
     pub parameters: Vec<String>,
 }
 
+impl HttpRequest {
+    pub fn get_header(&self, header_name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key == header_name)
+            .map(|(_, value)| value.as_str())
+    }
+}
+
 impl From<&mut SyncHttpRequest> for HttpRequest {
     fn from(request: &mut SyncHttpRequest) -> Self {
         let headers = request

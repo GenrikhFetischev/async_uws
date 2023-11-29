@@ -1,7 +1,7 @@
 use uwebsockets_rs::listen_socket::ListenSocket;
 
 use async_uws::app::App;
-use async_uws::http_response::HttpResponse;
+use async_uws::http_connection::HttpConnection;
 use async_uws::uwebsockets_rs::CompressOptions;
 use async_uws::uwebsockets_rs::UsSocketContextOptions;
 use async_uws::websocket::Websocket;
@@ -38,7 +38,7 @@ async fn main() {
         "/",
         route_settings.clone(),
         handler_ws,
-        HttpResponse::default_upgrade,
+        HttpConnection::default_upgrade,
     )
     .listen(9001, None::<fn(ListenSocket)>)
     .run();

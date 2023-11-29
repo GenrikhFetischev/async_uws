@@ -5,7 +5,7 @@ use tokio::time::sleep;
 
 use async_uws::app::App;
 use async_uws::http_request::HttpRequest;
-use async_uws::http_response::HttpResponse;
+use async_uws::http_connection::HttpConnection;
 use async_uws::uwebsockets_rs::UsSocketContextOptions;
 
 #[derive(Clone)]
@@ -44,7 +44,7 @@ async fn main() {
         .post("/post/stream", body_stream)
         .get(
             "/closure",
-            move |res: HttpResponse<false>, _req: HttpRequest| async {
+            move |res: HttpConnection<false>, _req: HttpRequest| async {
                 println!("Closure Handler started");
                 sleep(Duration::from_secs(1)).await;
                 println!("Closure Ready to respond");
@@ -65,7 +65,7 @@ async fn main() {
     println!("Server exiting");
 }
 
-async fn post_handler(mut res: HttpResponse<false>, _: HttpRequest) {
+async fn post_handler(mut res: HttpConnection<false>, _: HttpRequest) {
     let body = res.get_body().await.unwrap_or("There is no body".into());
     let body_str = String::from_utf8(body).unwrap();
     println!("{body_str}");
@@ -73,7 +73,7 @@ async fn post_handler(mut res: HttpResponse<false>, _: HttpRequest) {
     res.end(Some("Thanks".into()), true).await;
 }
 
-async fn body_stream(mut res: HttpResponse<false>, _: HttpRequest) {
+async fn body_stream(mut res: HttpConnection<false>, _: HttpRequest) {
     let mut body_stream = res.get_body_stream().unwrap();
 
     while let Some((chunk, _)) = body_stream.recv().await {
@@ -92,7 +92,7 @@ async fn body_stream(mut res: HttpResponse<false>, _: HttpRequest) {
     res.end(Some("Thanks".into()), true).await;
 }
 
-async fn get_handler(mut res: HttpResponse<false>, req: HttpRequest) {
+async fn get_handler(mut res: HttpConnection<false>, req: HttpRequest) {
     let data = res.data::<SharedData>().unwrap();
     println!("Shared data: {}", data.data);
     let path = req.full_url;

@@ -14,7 +14,7 @@ use uwebsockets_rs::uws_loop::{get_loop, UwsLoop};
 use crate::body_reader::BodyReader;
 use crate::data_storage::{DataStorage, SharedDataStorage};
 use crate::http_request::HttpRequest;
-use crate::http_response::HttpResponse;
+use crate::http_connection::HttpConnection;
 use crate::send_ptr::SendPtr;
 use crate::websocket::Websocket;
 use crate::ws_behavior::{WebsocketBehavior, WsPerSocketUserDataStorage, WsRouteSettings};
@@ -80,7 +80,7 @@ impl<const SSL: bool> AppStruct<SSL> {
     where
         T: (Fn(Websocket<SSL>) -> W) + 'static + Send + Sync + Clone,
         W: Future<Output = ()> + 'static + Send,
-        U: Fn(HttpRequest, HttpResponse<SSL>) + 'static + Send + Sync + Clone,
+        U: Fn(HttpRequest, HttpConnection<SSL>) + 'static + Send + Sync + Clone,
     {
         let ws_behavior = WebsocketBehavior::new(
             route_settings,
@@ -96,7 +96,7 @@ impl<const SSL: bool> AppStruct<SSL> {
 
     pub fn get<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
     where
-        T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
+        T: (Fn(HttpConnection<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
         let internal_handler =
@@ -107,7 +107,7 @@ impl<const SSL: bool> AppStruct<SSL> {
 
     pub fn post<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
     where
-        T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
+        T: (Fn(HttpConnection<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
         let internal_handler =
@@ -118,7 +118,7 @@ impl<const SSL: bool> AppStruct<SSL> {
 
     pub fn patch<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
     where
-        T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
+        T: (Fn(HttpConnection<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
         let internal_handler =
@@ -129,7 +129,7 @@ impl<const SSL: bool> AppStruct<SSL> {
 
     pub fn delete<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
     where
-        T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
+        T: (Fn(HttpConnection<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
         let internal_handler =
@@ -140,7 +140,7 @@ impl<const SSL: bool> AppStruct<SSL> {
 
     pub fn options<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
     where
-        T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
+        T: (Fn(HttpConnection<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
         let internal_handler =
@@ -151,7 +151,7 @@ impl<const SSL: bool> AppStruct<SSL> {
 
     pub fn put<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
     where
-        T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
+        T: (Fn(HttpConnection<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
         let internal_handler =
@@ -162,7 +162,7 @@ impl<const SSL: bool> AppStruct<SSL> {
 
     pub fn trace<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
     where
-        T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
+        T: (Fn(HttpConnection<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
         let internal_handler =
@@ -173,7 +173,7 @@ impl<const SSL: bool> AppStruct<SSL> {
 
     pub fn connect<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
     where
-        T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
+        T: (Fn(HttpConnection<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
         let internal_handler =
@@ -184,7 +184,7 @@ impl<const SSL: bool> AppStruct<SSL> {
 
     pub fn any<T, W>(&mut self, pattern: &str, handler: T) -> &mut Self
     where
-        T: (Fn(HttpResponse<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
+        T: (Fn(HttpConnection<SSL>, HttpRequest) -> W) + 'static + Send + Sync,
         W: Future<Output = ()> + 'static + Send,
     {
         let internal_handler =
@@ -221,7 +221,7 @@ pub fn wrap_http_handler<T, R, const SSL: bool>(
     data_storage: SharedDataStorage,
 ) -> Box<dyn Fn(HttpResponseStruct<SSL>, SyncHttpRequest)>
 where
-    T: (Fn(HttpResponse<SSL>, HttpRequest) -> R) + 'static + Send + Sync,
+    T: (Fn(HttpConnection<SSL>, HttpRequest) -> R) + 'static + Send + Sync,
     R: Future<Output = ()> + 'static + Send,
 {
     let handler = Box::new(handler);
@@ -238,15 +238,21 @@ where
         });
 
         let async_http_request = HttpRequest::from(&mut req);
-        let body_reader = BodyReader::new(res.clone());
+        let does_have_body = async_http_request.get_header("content-length").is_some();
+
+        let body_reader = if does_have_body {
+            Some(BodyReader::new(res.clone()))
+        } else {
+            None
+        };
 
         tokio::spawn(async move {
-            let res = HttpResponse::new(
+            let res = HttpConnection::new(
                 res,
                 uws_loop,
                 is_aborted,
                 data_storage.clone(),
-                Some(body_reader),
+                body_reader,
                 None,
                 None,
             );

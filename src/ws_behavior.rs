@@ -14,7 +14,7 @@ use uwebsockets_rs::websocket_behavior::{
 
 use crate::data_storage::SharedDataStorage;
 use crate::http_request::HttpRequest;
-use crate::http_response::HttpResponse;
+use crate::http_connection::HttpConnection;
 use crate::websocket::Websocket;
 use crate::ws_message::WsMessage;
 
@@ -76,7 +76,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
     ) -> Self
     where
         H: (Fn(Websocket<SSL>) -> R) + 'static + Send + Sync + Clone,
-        U: Fn(HttpRequest, HttpResponse<SSL>) + 'static + Send + Sync + Clone,
+        U: Fn(HttpRequest, HttpConnection<SSL>) + 'static + Send + Sync + Clone,
         R: Future<Output = ()> + 'static + Send,
     {
         let native_ws_behaviour = NativeWebSocketBehavior {
@@ -97,7 +97,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                     });
 
                     let req = HttpRequest::from(&mut req);
-                    let res = HttpResponse::<SSL>::new(
+                    let res = HttpConnection::<SSL>::new(
                         res,
                         uws_loop,
                         is_aborted.clone(),

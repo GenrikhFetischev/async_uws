@@ -1,7 +1,7 @@
 pub mod app;
 pub mod data_storage;
 pub mod http_request;
-pub mod http_response;
+pub mod http_connection;
 mod send_ptr;
 pub mod websocket;
 pub mod ws_behavior;

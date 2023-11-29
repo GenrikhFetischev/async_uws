@@ -1,8 +1,8 @@
 use std::ptr::NonNull;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-use tokio::sync::mpsc::{Receiver, unbounded_channel};
+use tokio::sync::mpsc::{unbounded_channel, Receiver};
 use uwebsockets_rs::http_response::HttpResponseStruct;
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket_behavior::UpgradeContext;
@@ -14,7 +14,7 @@ use crate::loop_defer_future::LoopDeferFuture;
 use crate::ws_behavior::{WsPerSocketUserData, WsPerSocketUserDataStorage};
 use crate::ws_message::WsMessage;
 
-pub struct HttpResponse<const SSL: bool> {
+pub struct HttpConnection<const SSL: bool> {
     pub(crate) native: Option<HttpResponseStruct<SSL>>,
     pub(crate) uws_loop: UwsLoop,
     pub(crate) body_reader: Option<BodyReader<SSL>>,
@@ -26,11 +26,11 @@ pub struct HttpResponse<const SSL: bool> {
     response_status: Option<String>,
 }
 
-unsafe impl<const SSL: bool> Sync for HttpResponse<SSL> {}
+unsafe impl<const SSL: bool> Sync for HttpConnection<SSL> {}
 
-unsafe impl<const SSL: bool> Send for HttpResponse<SSL> {}
+unsafe impl<const SSL: bool> Send for HttpConnection<SSL> {}
 
-impl<const SSL: bool> HttpResponse<SSL> {
+impl<const SSL: bool> HttpConnection<SSL> {
     pub fn new(
         native_response: HttpResponseStruct<SSL>,
         uws_loop: UwsLoop,
@@ -42,7 +42,7 @@ impl<const SSL: bool> HttpResponse<SSL> {
         // Will be not None only for upgrade requests
         upgrade_context: Option<UpgradeContext>,
     ) -> Self {
-        HttpResponse {
+        HttpConnection {
             native: Some(native_response),
             is_aborted,
             uws_loop,
@@ -55,6 +55,7 @@ impl<const SSL: bool> HttpResponse<SSL> {
         }
     }
 
+    // Will be none if there is no "content-length" header presented in request
     pub async fn get_body(&mut self) -> Option<Vec<u8>> {
         if let Some(body) = self.body_reader.take() {
             body.collect().await
@@ -63,6 +64,7 @@ impl<const SSL: bool> HttpResponse<SSL> {
         }
     }
 
+    // Will be none if there is no "content-length" header presented in request
     pub fn get_body_stream(&mut self) -> Result<Receiver<BodyChunk>, String> {
         match self.body_reader.take() {
             None => Err("Body could be read only once".to_string()),
@@ -82,7 +84,7 @@ impl<const SSL: bool> HttpResponse<SSL> {
             }
 
             if let Some(headers) = self.headers {
-                for (key    , value) in headers.iter() {
+                for (key, value) in headers.iter() {
                     connection.write_header(key, value);
                 }
             }
@@ -174,7 +176,7 @@ impl<const SSL: bool> HttpResponse<SSL> {
         loop_defer(self.uws_loop, callback)
     }
 
-    pub fn default_upgrade(req: HttpRequest, res: HttpResponse<SSL>) {
+    pub fn default_upgrade(req: HttpRequest, res: HttpConnection<SSL>) {
         let ws_key = req
             .get_header("sec-websocket-key")
             .map(String::from)

@@ -6,7 +6,7 @@ use tokio::sync::broadcast::Sender;
 use async_uws::app::App;
 use async_uws::data_storage::DataStorage;
 use async_uws::http_request::HttpRequest;
-use async_uws::http_response::HttpResponse;
+use async_uws::http_connection::HttpConnection;
 use async_uws::uwebsockets_rs::CompressOptions;
 use async_uws::uwebsockets_rs::Opcode;
 use async_uws::uwebsockets_rs::UsSocketContextOptions;
@@ -95,7 +95,7 @@ async fn main() {
         "/split",
         route_settings,
         ws_split,
-        HttpResponse::default_upgrade,
+        HttpConnection::default_upgrade,
     )
     .listen(
         3001,
@@ -107,7 +107,7 @@ async fn main() {
     println!("Server exiting");
 }
 
-fn custom_upgrade(req: HttpRequest, res: HttpResponse<false>) {
+fn custom_upgrade(req: HttpRequest, res: HttpConnection<false>) {
     let ws_key = req
         .headers
         .iter()

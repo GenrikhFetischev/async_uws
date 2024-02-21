@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Waker};
 
+use log::error;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket::{Opcode, SendStatus as NativeSendStatus, WebSocketStruct};
@@ -69,13 +70,13 @@ impl<const SSL: bool> Websocket<SSL> {
                 .await;
 
                 if let Err(e) = status {
-                    eprintln!("[async_uws] Error sending message to client: {e:#?}");
+                    error!("[async_uws] Error sending message to client: {e:#?}");
                     break;
                 }
 
                 let status = status.unwrap();
                 if status != SendStatus::Success {
-                    eprintln!(
+                    error!(
                         "[async_uws] Non Success status in attempt to send message to client: {status:#?}"
                     );
                     break;

@@ -1,6 +1,7 @@
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use log::debug;
 
 use tokio::sync::mpsc::{unbounded_channel, Receiver};
 use uwebsockets_rs::http_response::HttpResponseStruct;
@@ -159,7 +160,7 @@ impl<const SSL: bool> HttpConnection<SSL> {
             let ws_extensions: Option<&str> = ws_extensions.as_deref();
 
             if is_aborted.load(Ordering::SeqCst) {
-                println!("[async_uws] Upgrade request is aborted");
+                debug!("[async_uws] Upgrade request is aborted");
                 let mut storage = ws_per_socket_data_storage.lock().unwrap();
                 storage.remove(&user_data_id);
                 return;

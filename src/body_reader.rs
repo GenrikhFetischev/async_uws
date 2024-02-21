@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use log::error;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
 use uwebsockets_rs::http_response::HttpResponseStruct;
@@ -23,7 +24,7 @@ impl<const SSL: bool> BodyReader<SSL> {
                 let res = sink.send_timeout((chunk, end), Duration::from_millis(50))
                     .await;
                 if let Err(e) = res {
-                    eprintln!("[async_uws] Error sending body chunk to stream: {e:#?}");
+                    error!("[async_uws] Error sending body chunk to stream: {e:#?}");
                 }
 
             });

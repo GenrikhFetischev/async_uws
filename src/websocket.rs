@@ -19,6 +19,7 @@ pub struct Websocket<const SSL: bool> {
     is_open: Arc<AtomicBool>,
     global_data_storage: SharedDataStorage,
     per_connection_data_storage: SharedDataStorage,
+    pending_messages: Arc<Mutex<Vec<WsMessage>>>,
 }
 
 unsafe impl<const SSL: bool> Send for Websocket<SSL> {}
@@ -32,6 +33,7 @@ impl<const SSL: bool> Websocket<SSL> {
         is_open: Arc<AtomicBool>,
         global_data_storage: SharedDataStorage,
         per_connection_data_storage: SharedDataStorage,
+        pending_messages: Arc<Mutex<Vec<WsMessage>>>,
     ) -> Self {
         Websocket {
             stream: from_native_stream,
@@ -40,6 +42,7 @@ impl<const SSL: bool> Websocket<SSL> {
             is_open,
             global_data_storage,
             per_connection_data_storage,
+            pending_messages,
         }
     }
 
@@ -55,19 +58,20 @@ impl<const SSL: bool> Websocket<SSL> {
         let (to_client_sink, mut to_client_stream) = unbounded_channel::<(WsMessage, bool, bool)>();
 
         let uws_loop = self.uws_loop;
+        let pending_messages = self.pending_messages;
         tokio::spawn(async move {
             while let Some((message, compress, fin)) = to_client_stream.recv().await {
                 let websocket = self.native.clone();
 
                 let status = send_to_socket(
-                    message,
+                    message.clone(),
                     compress,
                     fin,
                     websocket,
                     uws_loop,
                     self.is_open.clone(),
                 )
-                .await;
+                    .await;
 
                 if let Err(e) = status {
                     error!("[async_uws] Error sending message to client: {e:#?}");
@@ -75,11 +79,18 @@ impl<const SSL: bool> Websocket<SSL> {
                 }
 
                 let status = status.unwrap();
-                if status != SendStatus::Success {
-                    error!(
+                match status {
+                    SendStatus::Success => {}
+                    SendStatus::Backpressure => {
+                        let mut pending_messages = pending_messages.lock().unwrap();
+                        pending_messages.push(message);
+                    }
+                    SendStatus::Dropped | SendStatus::WsDisconnected => {
+                        error!(
                         "[async_uws] Non Success status in attempt to send message to client: {status:#?}"
                     );
-                    break;
+                        break;
+                    }
                 }
             }
         });
@@ -108,7 +119,7 @@ impl<const SSL: bool> Websocket<SSL> {
             self.uws_loop,
             self.is_open.clone(),
         )
-        .await
+            .await
     }
 
     pub async fn send_with_options(
@@ -129,7 +140,7 @@ impl<const SSL: bool> Websocket<SSL> {
             self.uws_loop,
             self.is_open.clone(),
         )
-        .await
+            .await
     }
 }
 

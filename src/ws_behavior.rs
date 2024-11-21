@@ -13,8 +13,8 @@ use uwebsockets_rs::websocket_behavior::{
 };
 
 use crate::data_storage::SharedDataStorage;
-use crate::http_request::HttpRequest;
 use crate::http_connection::HttpConnection;
+use crate::http_request::HttpRequest;
 use crate::websocket::Websocket;
 use crate::ws_message::WsMessage;
 
@@ -30,6 +30,7 @@ pub struct WsPerSocketUserData {
     pub(crate) is_open: Arc<AtomicBool>,
     pub(crate) shared_data_storage: SharedDataStorage,
     pub(crate) custom_user_data: SharedDataStorage,
+    pub(crate) pending_messages: Arc<Mutex<Vec<WsMessage>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +78,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
     where
         H: (Fn(Websocket<SSL>) -> R) + 'static + Send + Sync + Clone,
         U: Fn(HttpRequest, HttpConnection<SSL>) + 'static + Send + Sync + Clone,
-        R: Future<Output = ()> + 'static + Send,
+        R: Future<Output=()> + 'static + Send,
     {
         let native_ws_behaviour = NativeWebSocketBehavior {
             compression: settings.compression.unwrap_or_default(),
@@ -119,6 +120,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                 let is_open = user_data.is_open.clone();
                 let data_storage = user_data.shared_data_storage.clone();
                 let per_connection_data_storage = user_data.custom_user_data.clone();
+                let pending_messages = user_data.pending_messages.clone();
                 tokio::spawn(async move {
                     let ws = Websocket::new(
                         ws_connection,
@@ -127,6 +129,7 @@ impl<const SSL: bool> WebsocketBehavior<SSL> {
                         is_open,
                         data_storage,
                         per_connection_data_storage,
+                        pending_messages,
                     );
                     handler(ws).await;
                 });
@@ -193,8 +196,15 @@ fn pong<const SSL: bool>(native_ws: WebSocketStruct<SSL>, message: Option<&[u8]>
         .unwrap_or_default();
 }
 
-fn drain<const SSL: bool>(_native_ws: WebSocketStruct<SSL>) {
-    todo!("Handle drain event")
+fn drain<const SSL: bool>(native_ws: WebSocketStruct<SSL>) {
+    let user_data = native_ws.get_user_data::<WsPerSocketUserData>().expect("[async_uws]: There is no receiver / sender pair in ws user data");
+    let mut pending_messages = user_data.pending_messages.lock().unwrap();
+    while let Some(message) = pending_messages.pop() {
+        user_data
+            .sink
+            .send(message)
+            .unwrap_or_default();
+    }
 }
 
 fn subscription<const SSL: bool>(

@@ -138,6 +138,7 @@ impl<const SSL: bool> HttpConnection<SSL> {
             is_open: Arc::new(AtomicBool::new(true)),
             shared_data_storage: self.data_storage.clone(),
             custom_user_data: user_data.unwrap_or_default(),
+            pending_messages: Default::default()
         };
 
         let mut user_data = Box::new(user_data);

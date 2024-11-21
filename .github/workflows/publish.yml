@@ -9,11 +9,6 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v1
-      - name: Pull uWebSockets
-        run: git submodule update --init uWebSockets
-      - name: Pull uSockets
-        run: cd uWebSockets && git submodule update --init uSockets
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable

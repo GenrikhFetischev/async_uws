@@ -1,7 +1,8 @@
+use log::debug;
+use std::collections::VecDeque;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use log::debug;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc::{unbounded_channel, Receiver};
 use uwebsockets_rs::http_response::HttpResponseStruct;
@@ -13,7 +14,7 @@ use crate::data_storage::SharedDataStorage;
 use crate::http_request::HttpRequest;
 use crate::loop_defer_future::LoopDeferFuture;
 use crate::ws_behavior::{WsPerSocketUserData, WsPerSocketUserDataStorage};
-use crate::ws_message::WsMessage;
+use crate::ws_message::{PendingChunks, WsMessage};
 
 pub struct HttpConnection<const SSL: bool> {
     pub(crate) native: Option<HttpResponseStruct<SSL>>,
@@ -138,7 +139,10 @@ impl<const SSL: bool> HttpConnection<SSL> {
             is_open: Arc::new(AtomicBool::new(true)),
             shared_data_storage: self.data_storage.clone(),
             custom_user_data: user_data.unwrap_or_default(),
-            pending_messages: Default::default()
+            pending_chunks: Arc::new(Mutex::new(PendingChunks {
+                chunks: VecDeque::new(),
+                uws_loop: self.uws_loop,
+            })),
         };
 
         let mut user_data = Box::new(user_data);

@@ -1,16 +1,16 @@
+use log::error;
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-
-use log::error;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uwebsockets_rs::uws_loop::{loop_defer, UwsLoop};
 use uwebsockets_rs::websocket::{Opcode, SendStatus as NativeSendStatus, WebSocketStruct};
 
 use crate::data_storage::SharedDataStorage;
-use crate::ws_message::WsMessage;
+use crate::ws_message::{PendingChunks, WsMessage};
 
 pub struct Websocket<const SSL: bool> {
     pub stream: UnboundedReceiver<WsMessage>,
@@ -19,7 +19,7 @@ pub struct Websocket<const SSL: bool> {
     is_open: Arc<AtomicBool>,
     global_data_storage: SharedDataStorage,
     per_connection_data_storage: SharedDataStorage,
-    pending_messages: Arc<Mutex<Vec<WsMessage>>>,
+    pending_chunks: Arc<Mutex<PendingChunks>>,
 }
 
 unsafe impl<const SSL: bool> Send for Websocket<SSL> {}
@@ -33,7 +33,7 @@ impl<const SSL: bool> Websocket<SSL> {
         is_open: Arc<AtomicBool>,
         global_data_storage: SharedDataStorage,
         per_connection_data_storage: SharedDataStorage,
-        pending_messages: Arc<Mutex<Vec<WsMessage>>>,
+        pending_chunks: Arc<Mutex<PendingChunks>>,
     ) -> Self {
         Websocket {
             stream: from_native_stream,
@@ -42,7 +42,7 @@ impl<const SSL: bool> Websocket<SSL> {
             is_open,
             global_data_storage,
             per_connection_data_storage,
-            pending_messages,
+            pending_chunks,
         }
     }
 
@@ -58,7 +58,8 @@ impl<const SSL: bool> Websocket<SSL> {
         let (to_client_sink, mut to_client_stream) = unbounded_channel::<(WsMessage, bool, bool)>();
 
         let uws_loop = self.uws_loop;
-        let pending_messages = self.pending_messages;
+
+        let pending_chunks = self.pending_chunks;
         tokio::spawn(async move {
             while let Some((message, compress, fin)) = to_client_stream.recv().await {
                 let websocket = self.native.clone();
@@ -70,8 +71,9 @@ impl<const SSL: bool> Websocket<SSL> {
                     websocket,
                     uws_loop,
                     self.is_open.clone(),
+                    pending_chunks.clone(),
                 )
-                    .await;
+                .await;
 
                 if let Err(e) = status {
                     error!("[async_uws] Error sending message to client: {e:#?}");
@@ -82,8 +84,7 @@ impl<const SSL: bool> Websocket<SSL> {
                 match status {
                     SendStatus::Success => {}
                     SendStatus::Backpressure => {
-                        let mut pending_messages = pending_messages.lock().unwrap();
-                        pending_messages.push(message);
+                        todo!("Must not be here");
                     }
                     SendStatus::Dropped | SendStatus::WsDisconnected => {
                         error!(
@@ -118,8 +119,9 @@ impl<const SSL: bool> Websocket<SSL> {
             self.native.clone(),
             self.uws_loop,
             self.is_open.clone(),
+            self.pending_chunks.clone(),
         )
-            .await
+        .await
     }
 
     pub async fn send_with_options(
@@ -139,8 +141,9 @@ impl<const SSL: bool> Websocket<SSL> {
             self.native.clone(),
             self.uws_loop,
             self.is_open.clone(),
+            self.pending_chunks.clone(),
         )
-            .await
+        .await
     }
 }
 
@@ -212,6 +215,7 @@ async fn send_to_socket<const SSL: bool>(
     websocket: WebSocketStruct<SSL>,
     uws_loop: UwsLoop,
     is_open: Arc<AtomicBool>,
+    pending_chunks: Arc<Mutex<PendingChunks>>,
 ) -> Result<SendStatus, String> {
     let send_status = match message {
         WsMessage::Message(msg, opcode) => {
@@ -225,6 +229,28 @@ async fn send_to_socket<const SSL: bool>(
             };
             WebsocketSendFuture::new(Box::new(callback), uws_loop).await
         }
+        WsMessage::Fragmented(msg, opcode, chunk_size) => {
+            let mut chunks = split_into_chunks(msg, chunk_size, opcode.clone(), compress);
+            let callback = move || {
+                if !is_open.load(Ordering::Relaxed) {
+                    return SendStatus::WsDisconnected;
+                }
+
+                while let Some((chunk, opcode, compress, is_last)) = chunks.pop_front() {
+                    let status =
+                        websocket.send_with_options(&chunk, opcode.clone(), compress, is_last);
+                    if status == NativeSendStatus::Backpressure {
+                        let mut pending_chunks = pending_chunks.lock().unwrap();
+                        *pending_chunks = PendingChunks { chunks, uws_loop };
+                        break;
+                    }
+                }
+
+                SendStatus::Success
+            };
+            WebsocketSendFuture::new(Box::new(callback), uws_loop).await
+        }
+
         WsMessage::Ping(msg) => {
             let callback = move || {
                 if !is_open.load(Ordering::Relaxed) {
@@ -259,4 +285,33 @@ async fn send_to_socket<const SSL: bool>(
         }
     };
     Ok(send_status)
+}
+
+fn split_into_chunks(
+    payload: Vec<u8>,
+    chunk_size: usize,
+    opcode: Opcode,
+    compress: bool,
+) -> VecDeque<(Vec<u8>, Opcode, bool, bool)> {
+    let payload_chunks: Vec<Vec<u8>> = payload
+        .chunks(chunk_size)
+        .map(|chunk| chunk.to_vec())
+        .collect();
+
+    let len = payload_chunks.len();
+    payload_chunks
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            let is_last = index == len - 1;
+            let is_first = index == 0;
+            let opcode = if is_first {
+                opcode.clone()
+            } else {
+                Opcode::Continuation
+            };
+
+            (chunk, opcode, compress, is_last)
+        })
+        .collect()
 }

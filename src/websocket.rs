@@ -293,25 +293,45 @@ fn split_into_chunks(
     opcode: Opcode,
     compress: bool,
 ) -> VecDeque<(Vec<u8>, Opcode, bool, bool)> {
-    let payload_chunks: Vec<Vec<u8>> = payload
-        .chunks(chunk_size)
-        .map(|chunk| chunk.to_vec())
-        .collect();
+    let payload_chunks: Vec<Vec<u8>> = split_into_chunks_utf8_safely(payload, chunk_size);
 
     let len = payload_chunks.len();
     payload_chunks
-        .into_iter()
-        .enumerate()
-        .map(|(index, chunk)| {
-            let is_last = index == len - 1;
-            let is_first = index == 0;
-            let opcode = if is_first {
-                opcode.clone()
-            } else {
-                Opcode::Continuation
-            };
+      .into_iter()
+      .enumerate()
+      .map(|(index, chunk)| {
+          let is_last = index == len - 1;
+          let is_first = index == 0;
+          let opcode = if is_first {
+              opcode.clone()
+          } else {
+              Opcode::Continuation
+          };
 
-            (chunk, opcode, compress, is_last)
-        })
-        .collect()
+          (chunk, opcode, compress, is_last)
+      })
+      .collect()
+}
+
+pub fn split_into_chunks_utf8_safely(payload: Vec<u8>, chunk_size: usize) -> Vec<Vec<u8>> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let payload_len = payload.len();
+
+    while start < payload_len {
+        let mut end = std::cmp::min(start + chunk_size, payload_len);
+
+        while end > start && std::str::from_utf8(&payload[start..end]).is_err() {
+            end -= 1;
+        }
+
+        if end == start {
+            panic!("Chunk size too small to hold single UTF-8 character");
+        }
+
+        chunks.push(payload[start..end].to_vec());
+        start = end;
+    }
+
+    chunks
 }
